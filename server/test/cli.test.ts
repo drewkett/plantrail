@@ -80,5 +80,5 @@ test("cli: export md and json", () => {
   assert.deepEqual(j.nodes[0].refs, ["a.ts"]);
   assert.deepEqual(j.edges, [{ from_id: "n1", to_id: "n3", type: "blocks" }]);
   assert.equal(j.checkpoints[0].note, "cp note");
-  assert.match(ap(["export", "--format", "xml"]).err, /md or json/);
+  assert.match(ap(["export", "--format", "xml"]).err, /md, json or html/);
 });

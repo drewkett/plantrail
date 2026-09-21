@@ -3,6 +3,8 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { autoplanHome, openDb } from "./db.ts";
+import { exportHtml } from "./html.ts";
+import { serve } from "./serve.ts";
 import { AutoplanError, Store, type AddItem, type Node, type NodeKind, type NodeStatus } from "./store.ts";
 
 const USAGE = `usage: autoplan <command> [args] [--cwd DIR] [--thread ID]
@@ -27,8 +29,9 @@ const USAGE = `usage: autoplan <command> [args] [--cwd DIR] [--thread ID]
   get ID [--depth D]                       full node detail (+ subtree)
   search QUERY [--all] [--kind K] [-n N]   full-text search this thread (--all: every thread);
                                            words match as prefixes, "quoted phrases" exactly
-  export [THREAD_ID] [--format md|json] [-o FILE]
-                                           dump a thread (default: bound) as markdown or JSON
+  export [THREAD_ID] [--format md|json|html] [-o FILE]
+                                           dump a thread (default: bound) as markdown, JSON, or HTML
+  serve [--port P]                         local live web view of all threads (default port 7847)
   checkpoint NOTE                          save handoff note
   resume [--session ID] [--hook]           SessionStart: bind + print status
                                            (--hook: read {cwd, session_id} JSON from stdin)
@@ -130,6 +133,7 @@ function main(argv = process.argv.slice(2)): number {
       depth: { type: "string" },
       format: { type: "string" },
       o: { type: "string", short: "o" },
+      port: { type: "string" },
     },
   });
   const [cmd, ...args] = positionals;
@@ -300,12 +304,27 @@ function main(argv = process.argv.slice(2)): number {
     }
     case "export": {
       const fmt = v.format ?? "md";
-      if (fmt !== "md" && fmt !== "json") throw new AutoplanError("--format must be md or json");
-      const text = fmt === "json" ? JSON.stringify(store.exportData(arg), null, 2) + "\n" : store.exportMarkdown(arg);
+      if (fmt !== "md" && fmt !== "json" && fmt !== "html") throw new AutoplanError("--format must be md, json or html");
+      const text =
+        fmt === "json" ? JSON.stringify(store.exportData(arg), null, 2) + "\n" : fmt === "html" ? exportHtml(store.exportData(arg)) : store.exportMarkdown(arg);
       if (v.o) {
         writeFileSync(v.o, text);
         out(`Wrote ${v.o}`);
       } else process.stdout.write(text);
+      return 0;
+    }
+    case "serve": {
+      const port = v.port ? Number(v.port) : 7847;
+      if (!Number.isInteger(port) || port < 0 || port > 65535) throw new AutoplanError("--port must be 0-65535");
+      const srv = serve(store, port);
+      srv.on("listening", () => {
+        const a = srv.address();
+        out(`autoplan serving on http://127.0.0.1:${typeof a === "object" && a ? a.port : port}/ (Ctrl-C to stop)`);
+      });
+      srv.on("error", (e) => {
+        process.stderr.write(`autoplan: ${e.message}\n`);
+        process.exitCode = 1;
+      });
       return 0;
     }
     case "checkpoint": {
