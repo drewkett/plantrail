@@ -226,3 +226,16 @@ test("search ranks title hits, matches prefixes/phrases, and scopes to thread", 
   assert.equal(store.search("wal", { all: true }).length, 3);
   assert.equal(store.search("wal", { all: true, kind: "question" }).length, 1);
 });
+
+test("status shows capped related findings/decisions from other threads", () => {
+  const { store } = setup();
+  const [q] = store.add([{ title: "Is SQLite WAL safe?", kind: "question" }]);
+  store.recordFinding(q.id, "WAL breaks on network filesystems", 0.8);
+  store.add([{ title: "Unrelated decision about colors", kind: "decision" }]);
+  store.createThread("Tune WAL checkpointing", "faster writes", false);
+  const s = store.statusText();
+  assert.match(s, /Related \(other threads\):\n  n\d+ \(finding\) WAL breaks/);
+  assert.doesNotMatch(s, /colors/);
+  store.createThread("Nothing in common here", "zzz", false);
+  assert.doesNotMatch(store.statusText(), /Related/);
+});

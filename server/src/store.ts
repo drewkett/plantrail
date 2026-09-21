@@ -521,6 +521,31 @@ export class Store {
       });
   }
 
+  /**
+   * Findings/decisions from other threads that share words with this thread's
+   * title and goal (any word matches, ranked by bm25). Capped for status().
+   */
+  related(threadId: string, limit = 3): SearchHit[] {
+    const t = this.getThread(threadId);
+    const words = [...new Set(
+      `${t.title} ${t.goal ?? ""}`.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [],
+    )].filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+    if (!words.length) return [];
+    return this.db
+      .prepare(
+        `SELECT n.*, t.title AS thread_title,
+                snippet(nodes_fts, -1, '[', ']', '…', 8) AS snippet
+         FROM nodes_fts JOIN nodes n ON n.rowid = nodes_fts.rowid JOIN threads t ON t.id = n.thread_id
+         WHERE nodes_fts MATCH ? AND n.thread_id != ? AND n.kind IN ('finding','decision') AND n.status = 'done'
+         ORDER BY bm25(nodes_fts, 10, 5, 1) LIMIT ?`,
+      )
+      .all(words.map((w) => `"${w}"*`).join(" OR "), t.id, limit)
+      .map((r) => {
+        const { thread_title, snippet, ...node } = r as unknown as Node & { thread_title: string; snippet: string };
+        return { node, snippet, thread_title };
+      });
+  }
+
   // ---------- checkpoints & status ----------
 
   checkpoint(note: string): { id: number } {
@@ -580,6 +605,11 @@ export class Store {
         lines.push(`  ${fmt(b)}${by.length ? ` ← ${by.join(", ")}` : ""}`);
       }
       if (blocked.length > 5) lines.push(`  …${blocked.length - 5} more`);
+    }
+    const rel = this.related(t.id);
+    if (rel.length) {
+      lines.push("Related (other threads):");
+      for (const h of rel) lines.push(`  ${fmt(h.node)} [${h.node.thread_id}]: ${clip(h.node.summary ?? h.snippet, 120)}`);
     }
     if (cp) lines.push(`Last checkpoint (${cp.created_at.slice(0, 16)}): ${clip(cp.note, 400)}`);
     return lines.join("\n");
@@ -660,6 +690,10 @@ function ftsQuery(q: string): string {
   if (!terms.length) throw new AutoplanError("search needs at least one word");
   return terms.join(" ");
 }
+
+const STOPWORDS = new Set(
+  "and are but can for has how its not the use was why about after also been before being both could does from have into just like more most much only other over same should some such than that their them then there these they this those through very what when where which while will with would your".split(" "),
+);
 
 function clip(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
