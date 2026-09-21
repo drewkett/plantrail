@@ -34,6 +34,7 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   edge FROM TYPE TO [--remove]             add/remove an edge; TYPE: blocks, derived_from, contradicts
   delete ID                                delete a mistaken leaf node with no edges
   next [-n N]                              ranked options to work on next
+  log [-n N]                               recent checkpoints and done/abandoned nodes (default 10)
   get ID [--depth D]                       full node detail (+ subtree)
   search QUERY [--all] [--kind K] [-n N]   full-text search this thread (--all: every thread);
                                            words match as prefixes, "quoted phrases" exactly
@@ -315,6 +316,9 @@ function main(argv = process.argv.slice(2)): number {
       out(fmt.formatNext(store.nextOptions(intOf(v.n, "-n") ?? 3)));
       return 0;
     }
+    case "log":
+      out(fmt.formatLog(store.log(intOf(v.n, "-n") ?? 10)));
+      return 0;
     case "get":
       out(store.getText(need(arg, "ID"), intOf(v.depth, "--depth") ?? 0));
       return 0;

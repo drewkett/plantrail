@@ -393,3 +393,21 @@ test("add and remove edges", () => {
   assert.match(store.getText(c.id), /Contradicts: n1/);
   assert.match(store.getText(a.id), /Contradicted by: n3/);
 });
+
+test("log interleaves checkpoints and resolved nodes, newest first", () => {
+  const { store, clock } = setup();
+  const [a, b, c] = store.add([{ title: "a" }, { title: "b" }, { title: "c" }]);
+  clock.advance(1000);
+  store.done(a.id, "did a");
+  clock.advance(1000);
+  store.checkpoint("cp1");
+  clock.advance(1000);
+  store.update(b.id, { status: "abandoned", summary: "dropped" });
+  const log = store.log();
+  assert.deepEqual(
+    log.map((e) => e.node?.id ?? e.checkpoint),
+    [b.id, "cp1", a.id],
+  );
+  assert.equal(store.log(1).length, 1);
+  assert.ok(!log.some((e) => e.node?.id === c.id));
+});

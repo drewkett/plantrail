@@ -291,6 +291,15 @@ server.registerTool(
 );
 
 server.registerTool(
+  "log",
+  {
+    description: "Recent history of the bound thread, newest first: checkpoint notes and done/abandoned nodes with their summaries.",
+    inputSchema: { n: z.number().int().min(1).max(100).default(10) },
+  },
+  ({ n }) => run(() => fmt.formatLog(store.log(n))),
+);
+
+server.registerTool(
   "get",
   {
     description: "Full detail for a node (body, summary, refs, edges), optionally with its subtree to `depth` levels.",

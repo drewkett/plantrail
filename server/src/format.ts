@@ -1,7 +1,7 @@
 // Result formatting shared by the CLI and the MCP server. `doneHint` renders
 // the "complete the parent" suggestion in each front end's own syntax.
 import type { LinkKey } from "./repo.ts";
-import type { Node, Option, SearchHit, Thread } from "./store.ts";
+import type { LogEntry, Node, Option, SearchHit, Thread } from "./store.ts";
 
 export type DoneHint = (id: string) => string;
 type Closed = { node: Node; unblocked: Node[]; parentReady: Node | null };
@@ -70,4 +70,15 @@ export function formatFinish(r: { thread: Thread; open: number }): string {
 
 export function formatEdge(from: string, type: string, to: string, removed: boolean, unblocked: Node[] = []): string {
   return lines([`${removed ? "Removed" : "Added"} ${from} ${type} ${to}.`, unblockedLine(unblocked)]);
+}
+
+export function formatLog(es: LogEntry[]): string {
+  if (!es.length) return "No checkpoints or resolved nodes yet.";
+  return es
+    .map((e) => {
+      const at = e.at.slice(0, 16);
+      if (e.node) return `${at} ${e.node.status} ${e.node.id} ${e.node.title}${e.node.summary ? ` — ${e.node.summary.replace(/\n+/g, " ")}` : ""}`;
+      return `${at} checkpoint: ${e.checkpoint.replace(/\n+/g, " ")}`;
+    })
+    .join("\n");
 }

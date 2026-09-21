@@ -19,6 +19,8 @@ export interface Thread {
   nudged_at?: string | null;
 }
 
+export type LogEntry = { at: string; checkpoint: string; node?: undefined } | { at: string; node: Node; checkpoint?: undefined };
+
 export interface Node {
   id: string;
   thread_id: string;
@@ -751,6 +753,28 @@ export class Store {
       .run(t.id, note.trim(), JSON.stringify(frontier), this.ts());
     this.touch(t.id);
     return { id: Number(r.lastInsertRowid) };
+  }
+
+  /**
+   * Recent history of a thread (default: bound), newest first: checkpoints and
+   * resolved (done/abandoned) nodes, timed by their last update.
+   */
+  log(n = 10, threadId?: string): LogEntry[] {
+    const t = threadId ? this.getThread(threadId) : this.current();
+    const cps = this.db
+      .prepare("SELECT note, created_at FROM checkpoints WHERE thread_id = ? ORDER BY id DESC LIMIT ?")
+      .all(t.id, n) as { note: string; created_at: string }[];
+    const nodes = this.db
+      .prepare(
+        "SELECT * FROM nodes WHERE thread_id = ? AND status IN ('done','abandoned') ORDER BY updated_at DESC, rowid DESC LIMIT ?",
+      )
+      .all(t.id, n) as unknown as Node[];
+    const entries: LogEntry[] = [
+      ...cps.map((c) => ({ at: c.created_at, checkpoint: c.note })),
+      ...nodes.map((node) => ({ at: node.updated_at, node })),
+    ];
+    // Stable sort keeps checkpoints ahead of nodes resolved in the same instant.
+    return entries.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, n);
   }
 
   statusText(threadId?: string): string {
