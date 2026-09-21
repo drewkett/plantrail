@@ -70,6 +70,20 @@ server.registerTool(
 );
 
 server.registerTool(
+  "park",
+  {
+    description:
+      "Park a thread (default: the bound one) so it stops auto-resuming here. Binding it again reactivates it. Threads idle 30 days are parked automatically.",
+    inputSchema: { thread_id: z.string().optional() },
+  },
+  ({ thread_id }) =>
+    run(() => {
+      const t = store.setThreadStatus(thread_id ?? store.current().id, "parked");
+      return `Parked ${t.id} "${t.title}".`;
+    }),
+);
+
+server.registerTool(
   "status",
   {
     description:

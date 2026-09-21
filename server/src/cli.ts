@@ -9,7 +9,8 @@ const USAGE = `usage: autoplan <command> [args] [--cwd DIR] [--thread ID]
   status                                   compact view of the bound thread
   threads [--all]                          list threads (* = bound here)
   create TITLE --goal G [--no-link]        create thread, link this dir, bind
-  bind THREAD_ID                           bind this dir to a thread
+  bind THREAD_ID                           bind this dir to a thread (reactivates a parked one)
+  park [THREAD_ID]                         park a thread (default: bound); threads idle 30d auto-park
   add TITLE [--kind K] [--parent ID] [--body B] [--priority N] [--blocks ID,..] [--blocked-by ID,..]
   add -                                    add items from a JSON array on stdin
                                            ({title, kind?, parent?, body?, priority?, blocks?, blocked_by?};
@@ -192,6 +193,11 @@ function main(argv = process.argv.slice(2)): number {
       store.bind(need(arg, "THREAD_ID"));
       out(store.statusText());
       return 0;
+    case "park": {
+      const t = store.setThreadStatus(arg ?? store.current().id, "parked");
+      out(`Parked ${t.id} "${t.title}". \`autoplan bind ${t.id}\` reactivates it.`);
+      return 0;
+    }
     case "add": {
       const items: AddItem[] =
         arg === "-"

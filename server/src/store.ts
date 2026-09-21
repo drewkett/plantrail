@@ -62,6 +62,11 @@ export interface SearchHit {
 export class AutoplanError extends Error {}
 
 const RESOLVED: NodeStatus[] = ["done", "abandoned"];
+/** Active threads untouched this long are parked by resume(). */
+export const PARK_AFTER_DAYS = 30;
+/** Active nodes untouched this long are flagged in status. */
+export const STALE_ACTIVE_DAYS = 3;
+const DAY = 86_400_000;
 
 export class Store {
   /** Thread bound to this process (one MCP server per Claude session). */
@@ -202,10 +207,26 @@ export class Store {
     this.touch(threadId);
   }
 
+  /** Binding a parked thread reactivates it. Done threads stay done. */
   bind(threadId: string, sessionId?: string): Thread {
     const t = this.getThread(threadId);
+    if (t.status === "parked") this.setThreadStatus(t.id, "active");
     this.bindInner(t.id, sessionId);
-    return t;
+    return this.getThread(t.id);
+  }
+
+  setThreadStatus(threadId: string, status: ThreadStatus): Thread {
+    this.getThread(threadId);
+    this.db.prepare("UPDATE threads SET status = ?, touched_at = ? WHERE id = ?").run(status, this.ts(), threadId);
+    return this.getThread(threadId);
+  }
+
+  /** Park active threads untouched for `days`. Returns the parked threads. */
+  autoPark(days = PARK_AFTER_DAYS): Thread[] {
+    const cutoff = new Date(this.now().getTime() - days * DAY).toISOString();
+    return this.db
+      .prepare("UPDATE threads SET status = 'parked' WHERE status = 'active' AND touched_at < ? RETURNING *")
+      .all(cutoff) as unknown as Thread[];
   }
 
   /**
@@ -594,7 +615,14 @@ export class Store {
       .map((s) => `${counts[s]} ${s}`)
       .join(", ");
     lines.push(`Nodes: ${countStr || "none"}`);
-    if (active.length) lines.push(`Active: ${active.map(fmt).join("; ")}`);
+    if (active.length) {
+      const now = this.now().getTime();
+      const flag = (n: Node) => {
+        const d = Math.floor((now - Date.parse(n.updated_at)) / DAY);
+        return d >= STALE_ACTIVE_DAYS ? ` [active ${d}d with no updates — finish, split, or mark blocked?]` : "";
+      };
+      lines.push(`Active: ${active.map((n) => fmt(n) + flag(n)).join("; ")}`);
+    }
     const next = this.nextOptions(3, t.id);
     if (next.length) {
       lines.push("Next:");
@@ -718,6 +746,7 @@ export class Store {
   }
 
   resume(sessionId?: string): string {
+    this.autoPark();
     const keys = locationKeys(this.cwd);
     const linked = this.threadsForLocation(keys);
     if (sessionId) {
@@ -742,7 +771,24 @@ export class Store {
         ...linked.map((t) => `  ${t.id} "${t.title}" (touched ${t.touched_at.slice(0, 10)})`),
       ].join("\n");
     }
-    return "";
+    return this.parkedHere(keys);
+  }
+
+  /** Hint about parked threads linked here, shown when no active thread is. */
+  private parkedHere(keys: LinkKey[]): string {
+    if (!keys.length) return "";
+    const cond = keys.map(() => "(l.kind = ? AND l.value = ?)").join(" OR ");
+    const parked = this.db
+      .prepare(
+        `SELECT DISTINCT t.* FROM threads t JOIN links l ON l.thread_id = t.id
+         WHERE t.status = 'parked' AND (${cond}) ORDER BY t.touched_at DESC LIMIT 3`,
+      )
+      .all(...keys.flatMap((k) => [k.kind, k.value])) as unknown as Thread[];
+    if (!parked.length) return "";
+    return [
+      "[autoplan] Parked threads linked here (idle; not resumed). If the user's task continues one, run `autoplan bind <thread_id>` to reactivate it:",
+      ...parked.map((t) => `  ${t.id} "${t.title}" (touched ${t.touched_at.slice(0, 10)})`),
+    ].join("\n");
   }
 }
 

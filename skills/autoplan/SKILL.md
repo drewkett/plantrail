@@ -35,6 +35,7 @@ Run it via Bash as `~/.autoplan/bin/autoplan <command>` (the SessionStart hook i
 
 - Discovered new work? `add` it; don't silently expand the current node.
 - Can't proceed? `autoplan update nN --status blocked --body "why"`, or add a blocker node with `--blocks nN`.
+- Thread on hold or finished for now? `autoplan park [tN]`. Threads idle 30 days auto-park at session start; `autoplan bind tN` reactivates one. If status flags an active node as idle for days, finish it, split it, or mark it blocked.
 - Dead end? `autoplan update nN --status abandoned --summary "why"`. Abandoning also frees anything it blocked.
 - Learned something that answers or informs a question? `autoplan finding nN "what you found" --confidence 0.8 --source <url|path>` (repeat `--source`). It's recorded as a done finding under nN; confidence is 0–1, so be honest about how sure you are. If it settles the question, add `--answers` to close nN with it. `next` ranks unexplored and low-confidence questions higher.
 - Record decisions as nodes (`--kind decision`) with the reasoning in `--body`, so later sessions don't reopen them.

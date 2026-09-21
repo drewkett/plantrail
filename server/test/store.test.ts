@@ -125,22 +125,24 @@ test("status is compact and includes checkpoint", () => {
 
 test("resume binds by session, then by linked location", () => {
   const { store, db, dir } = setup();
-  const fresh = new Store(db, dir);
+  const now = store.now;
+  const fresh = new Store(db, dir, now);
   assert.match(fresh.resume("s1"), /t1 "Test"/);
   assert.equal(fresh.bound, "t1");
   // A second thread linked here makes location ambiguous, but session s1 stays bound.
-  new Store(db, dir).createThread("Second", "g");
-  assert.match(new Store(db, dir).resume("s1"), /t1 "Test"/);
-  assert.match(new Store(db, dir).resume("s2"), /Multiple active threads/);
+  new Store(db, dir, now).createThread("Second", "g");
+  assert.match(new Store(db, dir, now).resume("s1"), /t1 "Test"/);
+  assert.match(new Store(db, dir, now).resume("s2"), /Multiple active threads/);
 });
 
 test("current() falls back to latest binding in cwd", () => {
-  const { db, dir } = setup();
-  const hook = new Store(db, dir);
+  const { store, db, dir } = setup();
+  const now = store.now;
+  const hook = new Store(db, dir, now);
   hook.resume("sess");
-  const server = new Store(db, dir);
+  const server = new Store(db, dir, now);
   assert.equal(server.current().id, "t1");
-  assert.throws(() => new Store(db, join(dir, "elsewhere")).current(), /No thread bound/);
+  assert.throws(() => new Store(db, join(dir, "elsewhere"), now).current(), /No thread bound/);
 });
 
 test("recordFinding attaches a done finding with confidence and sources", () => {
@@ -260,4 +262,22 @@ test("stop hook nudges once per batch of changes; precompact auto-checkpoints", 
   assert.match(store.statusText(), /Last checkpoint .*auto \(before \/compact\).*Changed: n1 done/);
   clock.advance(1000);
   assert.equal(store.stopNudge(), null);
+});
+
+test("resume auto-parks idle threads; bind reactivates; status flags long-active nodes", () => {
+  const { store, db, dir, clock } = setup();
+  const [a] = store.add([{ title: "a" }]);
+  store.start(a.id);
+  clock.advance(4 * 86_400_000);
+  assert.match(store.statusText(), /n1 a \[active 4d with no updates/);
+  clock.advance(30 * 86_400_000);
+  const fresh = new Store(db, dir, store.now);
+  const text = fresh.resume("s1");
+  assert.match(text, /Parked threads linked here/);
+  assert.match(text, /t1 "Test"/);
+  assert.equal(fresh.getThread("t1").status, "parked");
+  assert.equal(fresh.bind("t1").status, "active");
+  assert.match(fresh.resume("s1"), /^\[autoplan\] t1 "Test" \(active\)/);
+  store.setThreadStatus("t1", "parked");
+  assert.deepEqual(fresh.listThreads("parked").map((t) => t.id), ["t1"]);
 });
