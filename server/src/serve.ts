@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { createHash } from "node:crypto";
 import { exportHtml, indexHtml, locations } from "./html.ts";
-import { AutoplanError, type Store } from "./store.ts";
+import { PlantrailError, type Store } from "./store.ts";
 
 /** Change token for a thread: hash of its export minus the timestamp. */
 function version(store: Store, id: string): string {
@@ -35,7 +35,7 @@ export function serve(store: Store, port: number, host = "127.0.0.1"): Server {
       if ((m = path.match(/^\/api\/(t\d+)$/))) return send(200, "application/json", JSON.stringify(store.exportData(m[1])));
       return send(404, "text/plain", "not found\n");
     } catch (e) {
-      if (e instanceof AutoplanError) return send(404, "text/plain", e.message + "\n");
+      if (e instanceof PlantrailError) return send(404, "text/plain", e.message + "\n");
       return send(500, "text/plain", String(e) + "\n");
     }
   });

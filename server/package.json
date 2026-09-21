@@ -1,7 +1,7 @@
 {
-  "name": "autoplan-server",
+  "name": "plantrail-server",
   "version": "0.1.0",
-  "description": "autoplan MCP server + CLI",
+  "description": "plantrail MCP server + CLI",
   "directories": {
     "test": "test"
   },

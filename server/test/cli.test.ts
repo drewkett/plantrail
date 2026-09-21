@@ -8,10 +8,10 @@ import { join } from "node:path";
 const CLI = join(import.meta.dirname, "../src/cli.ts");
 
 function setup() {
-  const home = mkdtempSync(join(tmpdir(), "autoplan-home-"));
-  const cwd = mkdtempSync(join(tmpdir(), "autoplan-cwd-"));
+  const home = mkdtempSync(join(tmpdir(), "plantrail-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "plantrail-cwd-"));
   return (args: string[], input?: string) => {
-    const r = spawnSync("node", [CLI, "--cwd", cwd, ...args], { input, encoding: "utf8", env: { ...process.env, AUTOPLAN_HOME: home } });
+    const r = spawnSync("node", [CLI, "--cwd", cwd, ...args], { input, encoding: "utf8", env: { ...process.env, PLANTRAIL_HOME: home } });
     return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim(), home };
   };
 }
@@ -47,7 +47,7 @@ test("cli: resume installs the shim", () => {
   const ap = setup();
   const r = ap(["resume"]);
   assert.equal(r.code, 0);
-  assert.ok(existsSync(join(r.home, "bin", "autoplan")));
+  assert.ok(existsSync(join(r.home, "bin", "plantrail")));
 });
 
 test("cli: stop/precompact hooks emit JSON only when there is something to record", () => {

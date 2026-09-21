@@ -1,12 +1,26 @@
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 export type DB = DatabaseSync;
 
-export function autoplanHome(): string {
-  return process.env.AUTOPLAN_HOME ?? join(homedir(), ".autoplan");
+export function plantrailHome(): string {
+  if (process.env.PLANTRAIL_HOME) return process.env.PLANTRAIL_HOME;
+  const home = join(homedir(), ".plantrail");
+  moveLegacyHome(join(homedir(), ".autoplan"), home);
+  return home;
+}
+
+/** One-time move of state from the pre-rename ~/.autoplan dir; drops its old `autoplan` shim. */
+export function moveLegacyHome(legacy: string, home: string): void {
+  if (existsSync(home) || !existsSync(legacy)) return;
+  try {
+    renameSync(legacy, home);
+    rmSync(join(home, "bin", "autoplan"), { force: true });
+  } catch {
+    // Non-fatal: fall through to a fresh home.
+  }
 }
 
 /** Ordered migrations; index + 1 is the schema version stored in PRAGMA user_version. */
@@ -92,7 +106,7 @@ const MIGRATIONS: string[] = [
 export function openDb(path?: string): DB {
   let file = path;
   if (!file) {
-    const home = autoplanHome();
+    const home = plantrailHome();
     mkdirSync(home, { recursive: true });
     file = join(home, "state.db");
   }

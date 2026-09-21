@@ -97,13 +97,13 @@ ${live ? `setInterval(async()=>{try{const r=await fetch(${JSON.stringify(live.po
 `;
 }
 
-/** Thread index for `autoplan serve`. */
+/** Thread index for `plantrail serve`. */
 export function indexHtml(threads: { id: string; title: string; status: string; goal: string; touched_at: string; locations?: string[] }[], bound: string | null): string {
   const rows = threads
     .map((t) => `<li><a href="/t/${esc(t.id)}">${esc(t.id)} ${esc(t.title)}</a>${t.id === bound ? " <b>(bound)</b>" : ""} <span class="m">[${esc(t.status)}] touched ${esc(t.touched_at.slice(0, 10))}</span>${t.locations?.length ? `<div class="m"><code>${t.locations.map(esc).join("</code> · <code>")}</code></div>` : ""}${t.goal ? `<div class="m">${esc(t.goal)}</div>` : ""}</li>`)
     .join("");
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>autoplan threads</title>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>plantrail threads</title>
 <style>:root{--bg:#fbfbfa;--fg:#1d1d1b;--m:#6b6b66;--a:#2f6fdb}@media (prefers-color-scheme:dark){:root{--bg:#161615;--fg:#e8e8e4;--m:#9a9a94;--a:#6ea0ff}}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,sans-serif}main{max-width:900px;margin:0 auto;padding:20px 16px}a{color:var(--a)}.m{color:var(--m)}li{margin:0 0 10px}ul{padding-left:18px}</style></head>
-<body><main><h1>autoplan threads</h1>${rows ? `<ul>${rows}</ul>` : "<p class=m>No threads.</p>"}</main></body></html>`;
+<body><main><h1>plantrail threads</h1>${rows ? `<ul>${rows}</ul>` : "<p class=m>No threads.</p>"}</main></body></html>`;
 }

@@ -11,7 +11,7 @@ import { serve } from "../src/serve.ts";
 import { Store } from "../src/store.ts";
 
 test("html export escapes script-breaking text", () => {
-  const store = new Store(openDb(":memory:"), mkdtempSync(join(tmpdir(), "autoplan-test-")));
+  const store = new Store(openDb(":memory:"), mkdtempSync(join(tmpdir(), "plantrail-test-")));
   store.createThread("A <b>&</b>", "g");
   store.add([{ title: "</script><script>alert(1)</script>" }]);
   const html = exportHtml(store.exportData());
@@ -20,7 +20,7 @@ test("html export escapes script-breaking text", () => {
 });
 
 test("serve: index, thread page, version changes on edit, 404s", async () => {
-  const store = new Store(openDb(":memory:"), mkdtempSync(join(tmpdir(), "autoplan-test-")));
+  const store = new Store(openDb(":memory:"), mkdtempSync(join(tmpdir(), "plantrail-test-")));
   store.createThread("Demo", "ship it");
   store.add([{ title: "a", blocks: ["#1"] }, { title: "b" }]);
   const srv = serve(store, 0);

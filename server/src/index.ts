@@ -2,10 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { openDb } from "./db.ts";
-import { AutoplanError, Store, type Node } from "./store.ts";
+import { PlantrailError, Store, type Node } from "./store.ts";
 
 const store = new Store(openDb(), process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
-const server = new McpServer({ name: "autoplan", version: "0.1.0" });
+const server = new McpServer({ name: "plantrail", version: "0.1.0" });
 
 type Result = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -13,7 +13,7 @@ function run(fn: () => string): Result {
   try {
     return { content: [{ type: "text", text: fn() }] };
   } catch (e) {
-    if (e instanceof AutoplanError) return { content: [{ type: "text", text: e.message }], isError: true };
+    if (e instanceof PlantrailError) return { content: [{ type: "text", text: e.message }], isError: true };
     throw e;
   }
 }
@@ -26,7 +26,7 @@ server.registerTool(
   "thread_create",
   {
     description:
-      "Create a new autoplan thread (a long-running task or research effort) and bind this session to it. Links the current repo/dir by default so future sessions here resume it automatically.",
+      "Create a new plantrail thread (a long-running task or research effort) and bind this session to it. Links the current repo/dir by default so future sessions here resume it automatically.",
     inputSchema: {
       title: z.string(),
       goal: z.string().describe("What 'done' looks like, one or two sentences"),

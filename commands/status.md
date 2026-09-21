@@ -1,5 +1,5 @@
 ---
-description: Show the autoplan thread bound to this directory
+description: Show the plantrail thread bound to this directory
 allowed-tools: Bash(node:*)
 ---
 !`node "${CLAUDE_PLUGIN_ROOT}/server/dist/cli.js" status`

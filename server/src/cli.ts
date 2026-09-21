@@ -2,12 +2,12 @@ import { parseArgs } from "node:util";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { autoplanHome, openDb } from "./db.ts";
+import { plantrailHome, openDb } from "./db.ts";
 import { exportHtml } from "./html.ts";
 import { serve } from "./serve.ts";
-import { AutoplanError, Store, type AddItem, type Node, type NodeKind, type NodeStatus } from "./store.ts";
+import { PlantrailError, Store, type AddItem, type Node, type NodeKind, type NodeStatus } from "./store.ts";
 
-const USAGE = `usage: autoplan <command> [args] [--cwd DIR] [--thread ID]
+const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   status                                   compact view of the bound thread
   threads [--all]                          list threads (* = bound here)
   create TITLE --goal G [--no-link]        create thread, link this dir, bind
@@ -52,12 +52,12 @@ function readHookInput(): { cwd?: string; session_id?: string; stop_hook_active?
   }
 }
 
-/** Write ~/.autoplan/bin/autoplan pointing at this bundle, so Claude has a stable command to call. */
+/** Write ~/.plantrail/bin/plantrail pointing at this bundle, so Claude has a stable command to call. */
 function installShim(): void {
   try {
-    const dir = join(autoplanHome(), "bin");
+    const dir = join(plantrailHome(), "bin");
     mkdirSync(dir, { recursive: true });
-    const shim = join(dir, "autoplan");
+    const shim = join(dir, "plantrail");
     writeFileSync(shim, `#!/bin/sh\nexec node "${fileURLToPath(import.meta.url)}" "$@"\n`);
     chmodSync(shim, 0o755);
   } catch {
@@ -68,19 +68,19 @@ function installShim(): void {
 const line = (n: Node) => `${n.id} [${n.kind}/${n.status}] ${n.title}`;
 
 function need(v: string | undefined, what: string): string {
-  if (!v) throw new AutoplanError(`Missing ${what}. Run 'autoplan help' for usage.`);
+  if (!v) throw new PlantrailError(`Missing ${what}. Run 'plantrail help' for usage.`);
   return v;
 }
 
 function kindOf(v: string | undefined): NodeKind | undefined {
-  if (v !== undefined && !KINDS.includes(v)) throw new AutoplanError(`--kind must be one of ${KINDS.join(", ")}`);
+  if (v !== undefined && !KINDS.includes(v)) throw new PlantrailError(`--kind must be one of ${KINDS.join(", ")}`);
   return v as NodeKind | undefined;
 }
 
 function intOf(v: string | undefined, what: string): number | undefined {
   if (v === undefined) return undefined;
   const n = Number(v);
-  if (!Number.isInteger(n)) throw new AutoplanError(`${what} must be an integer`);
+  if (!Number.isInteger(n)) throw new PlantrailError(`${what} must be an integer`);
   return n;
 }
 
@@ -91,13 +91,13 @@ function parseItems(text: string): AddItem[] {
   try {
     items = JSON.parse(text);
   } catch (e) {
-    throw new AutoplanError(`stdin is not valid JSON: ${(e as Error).message}`);
+    throw new PlantrailError(`stdin is not valid JSON: ${(e as Error).message}`);
   }
   if (!Array.isArray(items)) items = [items];
   const arr = items as AddItem[];
-  if (!arr.length) throw new AutoplanError("No items to add");
+  if (!arr.length) throw new PlantrailError("No items to add");
   for (const [i, it] of arr.entries()) {
-    if (!it || typeof it.title !== "string" || !it.title.trim()) throw new AutoplanError(`Item #${i} needs a title`);
+    if (!it || typeof it.title !== "string" || !it.title.trim()) throw new PlantrailError(`Item #${i} needs a title`);
     kindOf(it.kind);
   }
   return arr;
@@ -159,7 +159,7 @@ function main(argv = process.argv.slice(2)): number {
         // JSON output: full status goes to Claude's context, a one-line notice to the user.
         const lines = text.split("\n");
         const nodes = lines.find((l) => l.startsWith("Nodes:"));
-        const notice = [lines[0].replace(/^\[autoplan\] /, "autoplan: resumed "), nodes?.replace(/^Nodes: /, "")]
+        const notice = [lines[0].replace(/^\[plantrail\] /, "plantrail: resumed "), nodes?.replace(/^Nodes: /, "")]
           .filter(Boolean)
           .join(" — ");
         out(JSON.stringify({
@@ -178,7 +178,7 @@ function main(argv = process.argv.slice(2)): number {
     }
     case "precompact": {
       const cp = store.autoCheckpoint(session, input.trigger === "manual" ? "/compact" : "auto-compaction");
-      if (cp) out(JSON.stringify({ systemMessage: `autoplan: saved checkpoint #${cp.id} on ${cp.thread} before compaction` }));
+      if (cp) out(JSON.stringify({ systemMessage: `plantrail: saved checkpoint #${cp.id} on ${cp.thread} before compaction` }));
       return 0;
     }
     case "status":
@@ -206,7 +206,7 @@ function main(argv = process.argv.slice(2)): number {
       return 0;
     case "park": {
       const t = store.setThreadStatus(arg ?? store.current().id, "parked");
-      out(`Parked ${t.id} "${t.title}". \`autoplan bind ${t.id}\` reactivates it.`);
+      out(`Parked ${t.id} "${t.title}". \`plantrail bind ${t.id}\` reactivates it.`);
       return 0;
     }
     case "link": {
@@ -246,7 +246,7 @@ function main(argv = process.argv.slice(2)): number {
       out(`Done ${line(node)}`);
       if (unblocked.length) out(`Unblocked: ${unblocked.map(line).join("; ")}`);
       if (parentReady)
-        out(`All children of ${parentReady.id} "${parentReady.title}" are resolved — consider: autoplan done ${parentReady.id}`);
+        out(`All children of ${parentReady.id} "${parentReady.title}" are resolved — consider: plantrail done ${parentReady.id}`);
       return 0;
     }
     case "finding": {
@@ -254,7 +254,7 @@ function main(argv = process.argv.slice(2)): number {
       let conf: number | undefined;
       if (v.confidence !== undefined) {
         conf = Number(v.confidence);
-        if (Number.isNaN(conf)) throw new AutoplanError("--confidence must be a number between 0 and 1");
+        if (Number.isNaN(conf)) throw new PlantrailError("--confidence must be a number between 0 and 1");
       }
       const { node: n, closed } = store.recordFinding(
         need(id, "ID"),
@@ -268,13 +268,13 @@ function main(argv = process.argv.slice(2)): number {
         out(`Answered ${line(closed.node)}`);
         if (closed.unblocked.length) out(`Unblocked: ${closed.unblocked.map(line).join("; ")}`);
         if (closed.parentReady)
-          out(`All children of ${closed.parentReady.id} "${closed.parentReady.title}" are resolved — consider: autoplan done ${closed.parentReady.id}`);
+          out(`All children of ${closed.parentReady.id} "${closed.parentReady.title}" are resolved — consider: plantrail done ${closed.parentReady.id}`);
       }
       return 0;
     }
     case "update": {
       if (v.status !== undefined && !["open", "blocked", "abandoned"].includes(v.status))
-        throw new AutoplanError("--status must be open, blocked, or abandoned (use start/done otherwise)");
+        throw new PlantrailError("--status must be open, blocked, or abandoned (use start/done otherwise)");
       const { node, unblocked } = store.update(need(arg, "ID"), {
         title: v.title,
         body: v.body,
@@ -304,7 +304,7 @@ function main(argv = process.argv.slice(2)): number {
     }
     case "export": {
       const fmt = v.format ?? "md";
-      if (fmt !== "md" && fmt !== "json" && fmt !== "html") throw new AutoplanError("--format must be md, json or html");
+      if (fmt !== "md" && fmt !== "json" && fmt !== "html") throw new PlantrailError("--format must be md, json or html");
       const text =
         fmt === "json" ? JSON.stringify(store.exportData(arg), null, 2) + "\n" : fmt === "html" ? exportHtml(store.exportData(arg)) : store.exportMarkdown(arg);
       if (v.o) {
@@ -315,14 +315,14 @@ function main(argv = process.argv.slice(2)): number {
     }
     case "serve": {
       const port = v.port ? Number(v.port) : 7847;
-      if (!Number.isInteger(port) || port < 0 || port > 65535) throw new AutoplanError("--port must be 0-65535");
+      if (!Number.isInteger(port) || port < 0 || port > 65535) throw new PlantrailError("--port must be 0-65535");
       const srv = serve(store, port);
       srv.on("listening", () => {
         const a = srv.address();
-        out(`autoplan serving on http://127.0.0.1:${typeof a === "object" && a ? a.port : port}/ (Ctrl-C to stop)`);
+        out(`plantrail serving on http://127.0.0.1:${typeof a === "object" && a ? a.port : port}/ (Ctrl-C to stop)`);
       });
       srv.on("error", (e) => {
-        process.stderr.write(`autoplan: ${e.message}\n`);
+        process.stderr.write(`plantrail: ${e.message}\n`);
         process.exitCode = 1;
       });
       return 0;
@@ -345,7 +345,7 @@ function main(argv = process.argv.slice(2)): number {
 try {
   process.exitCode = main();
 } catch (e) {
-  if (!(e instanceof AutoplanError) && !(e instanceof TypeError && "code" in e)) throw e;
+  if (!(e instanceof PlantrailError) && !(e instanceof TypeError && "code" in e)) throw e;
   console.error(e.message);
   process.exitCode = 1;
 }

@@ -1,8 +1,8 @@
 {
-  "name": "autoplan-dev",
-  "description": "Local dev marketplace for autoplan",
+  "name": "plantrail-dev",
+  "description": "Local dev marketplace for plantrail",
   "owner": { "name": "Andrew Burkett" },
   "plugins": [
-    { "name": "autoplan", "source": "./", "description": "Queryable state for long-running tasks and research." }
+    { "name": "plantrail", "source": "./", "description": "Queryable state for long-running tasks and research." }
   ]
 }

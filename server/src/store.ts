@@ -72,7 +72,7 @@ export interface ThreadExport {
   checkpoints: { id: number; note: string; frontier: { active: string[]; next: string[] }; created_at: string }[];
 }
 
-export class AutoplanError extends Error {}
+export class PlantrailError extends Error {}
 
 const RESOLVED: NodeStatus[] = ["done", "abandoned"];
 /** Active threads untouched this long are parked by resume(). */
@@ -126,13 +126,13 @@ export class Store {
 
   getThread(id: string): Thread {
     const t = this.db.prepare("SELECT * FROM threads WHERE id = ?").get(id) as Thread | undefined;
-    if (!t) throw new AutoplanError(`No thread ${id}`);
+    if (!t) throw new PlantrailError(`No thread ${id}`);
     return t;
   }
 
   getNode(id: string): Node {
     const n = this.db.prepare("SELECT * FROM nodes WHERE id = ?").get(id) as Node | undefined;
-    if (!n) throw new AutoplanError(`No node ${id}`);
+    if (!n) throw new PlantrailError(`No node ${id}`);
     return n;
   }
 
@@ -290,8 +290,8 @@ export class Store {
     }
     const hint = linked.length
       ? `Linked threads here: ${linked.map((t) => `${t.id} "${t.title}"`).join(", ")}.`
-      : "Use `autoplan threads` or `autoplan create`.";
-    throw new AutoplanError(`No thread bound. Run \`autoplan bind <thread_id>\`. ${hint}`);
+      : "Use `plantrail threads` or `plantrail create`.";
+    throw new PlantrailError(`No thread bound. Run \`plantrail bind <thread_id>\`. ${hint}`);
   }
 
   // ---------- nodes ----------
@@ -305,11 +305,11 @@ export class Store {
         const m = /^#(\d+)$/.exec(ref);
         if (m) {
           const id = ids[Number(m[1])];
-          if (!id) throw new AutoplanError(`Reference ${ref} must point to an earlier item in this call`);
+          if (!id) throw new PlantrailError(`Reference ${ref} must point to an earlier item in this call`);
           return id;
         }
         const n = this.getNode(ref);
-        if (n.thread_id !== thread.id) throw new AutoplanError(`${ref} belongs to thread ${n.thread_id}`);
+        if (n.thread_id !== thread.id) throw new PlantrailError(`${ref} belongs to thread ${n.thread_id}`);
         return n.id;
       };
       const insert = this.db.prepare(
@@ -338,7 +338,7 @@ export class Store {
       }
       for (const [from, ref] of deferred) {
         const to = resolve(ref);
-        if (to === from) throw new AutoplanError("A node cannot block itself");
+        if (to === from) throw new PlantrailError("A node cannot block itself");
         edge.run(from, to);
       }
       this.touch(thread.id);
@@ -348,12 +348,12 @@ export class Store {
 
   start(id: string): { node: Node; demoted: string[] } {
     const node = this.getNode(id);
-    if (RESOLVED.includes(node.status)) throw new AutoplanError(`${id} is ${node.status}; reopen it with update first`);
+    if (RESOLVED.includes(node.status)) throw new PlantrailError(`${id} is ${node.status}; reopen it with update first`);
     const blockers = this.blockers(id);
     if (blockers.length)
-      throw new AutoplanError(`${id} is blocked by ${blockers.map((b) => `${b.id} "${b.title}"`).join(", ")}`);
+      throw new PlantrailError(`${id} is blocked by ${blockers.map((b) => `${b.id} "${b.title}"`).join(", ")}`);
     if (node.status === "blocked")
-      throw new AutoplanError(`${id} is marked blocked; update its status to open first`);
+      throw new PlantrailError(`${id} is marked blocked; update its status to open first`);
     return this.tx(() => {
       const now = this.ts();
       const demoted = (
@@ -371,12 +371,12 @@ export class Store {
   }
 
   done(id: string, summary: string, refs?: string[]): { node: Node; unblocked: Node[]; parentReady: Node | null } {
-    if (!summary?.trim()) throw new AutoplanError("done requires a non-empty summary");
+    if (!summary?.trim()) throw new PlantrailError("done requires a non-empty summary");
     const node = this.getNode(id);
-    if (node.status === "done") throw new AutoplanError(`${id} is already done`);
+    if (node.status === "done") throw new PlantrailError(`${id} is already done`);
     const open = this.children(id).filter((c) => !RESOLVED.includes(c.status));
     if (open.length)
-      throw new AutoplanError(`${id} has unresolved children: ${open.map((c) => c.id).join(", ")}`);
+      throw new PlantrailError(`${id} has unresolved children: ${open.map((c) => c.id).join(", ")}`);
     return this.tx(() => this.complete(node, summary.trim(), refs, this.ts()));
   }
 
@@ -427,17 +427,17 @@ export class Store {
     sources?: string[],
     answers = false,
   ): { node: Node; closed: { node: Node; unblocked: Node[]; parentReady: Node | null } | null } {
-    if (!text?.trim()) throw new AutoplanError("A finding needs text");
+    if (!text?.trim()) throw new PlantrailError("A finding needs text");
     if (confidence !== undefined && !(confidence >= 0 && confidence <= 1))
-      throw new AutoplanError("confidence must be between 0 and 1");
+      throw new PlantrailError("confidence must be between 0 and 1");
     const parent = this.getNode(parentId);
-    if (parent.kind === "finding") throw new AutoplanError(`${parentId} is a finding; attach to the question it informs`);
+    if (parent.kind === "finding") throw new PlantrailError(`${parentId} is a finding; attach to the question it informs`);
     if (answers) {
-      if (parent.kind !== "question") throw new AutoplanError(`${parentId} is a ${parent.kind}; only questions can be answered`);
-      if (RESOLVED.includes(parent.status)) throw new AutoplanError(`${parentId} is already ${parent.status}`);
+      if (parent.kind !== "question") throw new PlantrailError(`${parentId} is a ${parent.kind}; only questions can be answered`);
+      if (RESOLVED.includes(parent.status)) throw new PlantrailError(`${parentId} is already ${parent.status}`);
       const open = this.children(parentId).filter((c) => !RESOLVED.includes(c.status));
       if (open.length)
-        throw new AutoplanError(`${parentId} has unresolved children: ${open.map((c) => c.id).join(", ")}`);
+        throw new PlantrailError(`${parentId} has unresolved children: ${open.map((c) => c.id).join(", ")}`);
     }
     const t = text.trim();
     return this.tx(() => {
@@ -483,10 +483,10 @@ export class Store {
   ): { node: Node; unblocked: Node[] } {
     const node = this.getNode(id);
     if (fields.status === "done")
-      throw new AutoplanError("Use done(id, summary) to complete a node");
+      throw new PlantrailError("Use done(id, summary) to complete a node");
     if (fields.status === "abandoned" && !(fields.summary ?? node.summary)?.trim())
-      throw new AutoplanError("Abandoning requires a summary explaining why");
-    if (fields.status === "active") throw new AutoplanError("Use start(id) to activate a node");
+      throw new PlantrailError("Abandoning requires a summary explaining why");
+    if (fields.status === "active") throw new PlantrailError("Use start(id) to activate a node");
     const sets: string[] = [];
     const vals: (string | number | null)[] = [];
     for (const k of ["title", "body", "status", "priority", "summary", "kind"] as const) {
@@ -495,7 +495,7 @@ export class Store {
         vals.push(fields[k] as string | number);
       }
     }
-    if (!sets.length) throw new AutoplanError("No fields to update");
+    if (!sets.length) throw new PlantrailError("No fields to update");
     return this.tx(() => {
       const now = this.ts();
       this.db.prepare(`UPDATE nodes SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`).run(...vals, now, id);
@@ -609,7 +609,7 @@ export class Store {
   // ---------- checkpoints & status ----------
 
   checkpoint(note: string): { id: number } {
-    if (!note?.trim()) throw new AutoplanError("checkpoint requires a note");
+    if (!note?.trim()) throw new PlantrailError("checkpoint requires a note");
     const t = this.current();
     const active = this.db
       .prepare("SELECT id FROM nodes WHERE thread_id = ? AND status = 'active'")
@@ -645,7 +645,7 @@ export class Store {
     const cp = this.db
       .prepare("SELECT note, created_at FROM checkpoints WHERE thread_id = ? ORDER BY id DESC LIMIT 1")
       .get(t.id) as { note: string; created_at: string } | undefined;
-    const lines = [`[autoplan] ${t.id} "${t.title}" (${t.status})`];
+    const lines = [`[plantrail] ${t.id} "${t.title}" (${t.status})`];
     if (t.goal) lines.push(`Goal: ${clip(t.goal, 200)}`);
     const countStr = ["open", "active", "blocked", "done", "abandoned"]
       .filter((s) => counts[s])
@@ -801,7 +801,7 @@ export class Store {
     try {
       return this.current();
     } catch (e) {
-      if (e instanceof AutoplanError) return null;
+      if (e instanceof PlantrailError) return null;
       throw e;
     }
   }
@@ -830,9 +830,9 @@ export class Store {
     this.db.prepare("UPDATE threads SET nudged_at = ? WHERE id = ?").run(this.ts(), t.id);
     const list = changed.slice(0, 5).map((n) => `${n.id} (${n.status})`).join(", ");
     return (
-      `[autoplan] ${t.id}: ${changed.length} node(s) changed since the last checkpoint: ${list}${changed.length > 5 ? ", …" : ""}. ` +
+      `[plantrail] ${t.id}: ${changed.length} node(s) changed since the last checkpoint: ${list}${changed.length > 5 ? ", …" : ""}. ` +
       "Before stopping: mark finished nodes done with a summary, add any new work you found, and run " +
-      "`autoplan checkpoint \"<state, next step, gotchas>\"`. If that's already covered, just stop."
+      "`plantrail checkpoint \"<state, next step, gotchas>\"`. If that's already covered, just stop."
     );
   }
 
@@ -878,7 +878,7 @@ export class Store {
     }
     if (linked.length > 1) {
       return [
-        "[autoplan] Multiple active threads are linked to this location. Ask the user which one, then run `autoplan bind <thread_id>`:",
+        "[plantrail] Multiple active threads are linked to this location. Ask the user which one, then run `plantrail bind <thread_id>`:",
         ...linked.map((t) => `  ${t.id} "${t.title}" (touched ${t.touched_at.slice(0, 10)})`),
       ].join("\n");
     }
@@ -897,7 +897,7 @@ export class Store {
       .all(...keys.flatMap((k) => [k.kind, k.value])) as unknown as Thread[];
     if (!parked.length) return "";
     return [
-      "[autoplan] Parked threads linked here (idle; not resumed). If the user's task continues one, run `autoplan bind <thread_id>` to reactivate it:",
+      "[plantrail] Parked threads linked here (idle; not resumed). If the user's task continues one, run `plantrail bind <thread_id>` to reactivate it:",
       ...parked.map((t) => `  ${t.id} "${t.title}" (touched ${t.touched_at.slice(0, 10)})`),
     ].join("\n");
   }
@@ -914,7 +914,7 @@ function ftsQuery(q: string): string {
       for (const w of m[2].match(/[\p{L}\p{N}_]+/gu) ?? []) terms.push(`"${w}"*`);
     }
   }
-  if (!terms.length) throw new AutoplanError("search needs at least one word");
+  if (!terms.length) throw new PlantrailError("search needs at least one word");
   return terms.join(" ");
 }
 

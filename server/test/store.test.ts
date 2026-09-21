@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDb } from "../src/db.ts";
-import { AutoplanError, Store } from "../src/store.ts";
+import { moveLegacyHome, openDb } from "../src/db.ts";
+import { PlantrailError, Store } from "../src/store.ts";
 
 function setup() {
-  const dir = mkdtempSync(join(tmpdir(), "autoplan-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "plantrail-test-"));
   let t = Date.parse("2026-01-01T00:00:00Z");
   const clock = { advance: (ms: number) => (t += ms) };
   const db = openDb(":memory:");
@@ -28,7 +28,7 @@ test("done requires summary and unblocks dependents", () => {
   const { store } = setup();
   const [a, b] = store.add([{ title: "a", blocks: ["#1"] }, { title: "b" }]);
   assert.throws(() => store.start(b.id), /blocked by n1/);
-  assert.throws(() => store.done(a.id, "  "), AutoplanError);
+  assert.throws(() => store.done(a.id, "  "), PlantrailError);
   const r = store.done(a.id, "did a", ["file.ts"]);
   assert.deepEqual(r.unblocked.map((n) => n.id), [b.id]);
   assert.equal(store.start(b.id).node.status, "active");
@@ -277,14 +277,14 @@ test("resume auto-parks idle threads; bind reactivates; status flags long-active
   assert.match(text, /t1 "Test"/);
   assert.equal(fresh.getThread("t1").status, "parked");
   assert.equal(fresh.bind("t1").status, "active");
-  assert.match(fresh.resume("s1"), /^\[autoplan\] t1 "Test" \(active\)/);
+  assert.match(fresh.resume("s1"), /^\[plantrail\] t1 "Test" \(active\)/);
   store.setThreadStatus("t1", "parked");
   assert.deepEqual(fresh.listThreads("parked").map((t) => t.id), ["t1"]);
 });
 
 test("link: relinks after a move, prunes dead paths, resume self-heals via other keys", () => {
   const { store, db, dir } = setup();
-  const moved = mkdtempSync(join(tmpdir(), "autoplan-moved-"));
+  const moved = mkdtempSync(join(tmpdir(), "plantrail-moved-"));
   const here = new Store(db, moved, store.now);
   assert.throws(() => here.current(), /No thread bound/);
   here.addLink("t1", { kind: "dir", value: "/nonexistent/old/path" });
@@ -297,5 +297,22 @@ test("link: relinks after a move, prunes dead paths, resume self-heals via other
   // resume matching on one key adds the location's other keys
   db.prepare("DELETE FROM links WHERE value = ?").run(realpathSync(dir));
   here.addLink("t1", { kind: "dir", value: realpathSync(dir) });
-  assert.match(new Store(db, dir, store.now).resume("s9"), /^\[autoplan\] t1/);
+  assert.match(new Store(db, dir, store.now).resume("s9"), /^\[plantrail\] t1/);
+});
+
+test("legacy ~/.autoplan home moves once and drops old shim", () => {
+  const root = mkdtempSync(join(tmpdir(), "plantrail-home-"));
+  const legacy = join(root, ".autoplan");
+  const home = join(root, ".plantrail");
+  mkdirSync(join(legacy, "bin"), { recursive: true });
+  writeFileSync(join(legacy, "state.db"), "db");
+  writeFileSync(join(legacy, "bin", "autoplan"), "shim");
+  moveLegacyHome(legacy, home);
+  assert.equal(readFileSync(join(home, "state.db"), "utf8"), "db");
+  assert.ok(!existsSync(legacy));
+  assert.ok(!existsSync(join(home, "bin", "autoplan")));
+  mkdirSync(legacy);
+  writeFileSync(join(legacy, "state.db"), "newer");
+  moveLegacyHome(legacy, home);
+  assert.equal(readFileSync(join(home, "state.db"), "utf8"), "db");
 });
