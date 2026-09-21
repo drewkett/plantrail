@@ -343,3 +343,18 @@ test("legacy ~/.autoplan home moves once and drops old shim", () => {
   moveLegacyHome(legacy, home);
   assert.equal(readFileSync(join(home, "state.db"), "utf8"), "db");
 });
+
+test("finish and reopen threads", () => {
+  const { store, dir, db } = setup();
+  const t = store.current();
+  store.add([{ title: "a" }]);
+  const r = store.finishThread(t.id);
+  assert.equal(r.thread.status, "done");
+  assert.equal(r.open, 1);
+  assert.throws(() => store.finishThread(t.id), /already done/);
+  // A fresh process in the same dir no longer auto-resumes the done thread.
+  assert.throws(() => new Store(db, dir).current(), PlantrailError);
+  assert.equal(store.reopenThread(t.id).status, "active");
+  assert.throws(() => store.reopenThread(t.id), /already active/);
+  assert.equal(new Store(db, dir).current().id, t.id);
+});

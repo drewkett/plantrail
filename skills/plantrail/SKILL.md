@@ -35,7 +35,7 @@ Run it via Bash as `~/.plantrail/bin/plantrail <command>` (the SessionStart hook
 
 - Discovered new work? `add` it; don't silently expand the current node.
 - Can't proceed? `plantrail update nN --status blocked --body "why"`, or add a blocker node with `--blocks nN`.
-- Thread on hold or finished for now? `plantrail park [tN]`. Threads idle 30 days auto-park at session start; `plantrail bind tN` reactivates one. If status flags an active node as idle for days, finish it, split it, or mark it blocked.
+- Thread on hold? `plantrail park [tN]`. Goal met? `plantrail finish [tN]` (`plantrail reopen tN` undoes it). Threads idle 30 days auto-park at session start; `plantrail bind tN` reactivates one. If status flags an active node as idle for days, finish it, split it, or mark it blocked.
 - Repo moved or cloned elsewhere and the thread no longer resumes? `plantrail link tN` links this location (add `--prune` to drop paths that no longer exist; `plantrail unlink kind:value` removes one stale link, e.g. an old repo URL). Moves are healed automatically when the origin URL still matches.
 - Dead end? `plantrail update nN --status abandoned --summary "why"`. Abandoning also frees anything it blocked.
 - Learned something that answers or informs a question? `plantrail finding nN "what you found" --confidence 0.8 --source <url|path>` (repeat `--source`). It's recorded as a done finding under nN; confidence is 0–1, so be honest about how sure you are. If it settles the question, add `--answers` to close nN with it. `next` ranks unexplored and low-confidence questions higher.

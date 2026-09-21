@@ -14,6 +14,8 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   create TITLE --goal G [--no-link]        create thread, link this dir, bind
   bind THREAD_ID                           bind this dir to a thread (reactivates a parked one)
   park [THREAD_ID]                         park a thread (default: bound); threads idle 30d auto-park
+  finish [THREAD_ID]                       mark a thread (default: bound) done; it stops auto-resuming
+  reopen THREAD_ID                         reactivate a done or parked thread
   rename [TITLE] [--goal G]                change the bound thread's title and/or goal (or --thread ID)
   link [THREAD_ID] [--prune]               link this dir/repo to a thread (default: bound), e.g. after
                                            a repo moved; --prune drops links to paths that no longer exist
@@ -208,6 +210,14 @@ function main(argv = process.argv.slice(2)): number {
     case "park": {
       const t = store.setThreadStatus(arg ?? store.current().id, "parked");
       out(`Parked ${t.id} "${t.title}". \`plantrail bind ${t.id}\` reactivates it.`);
+      return 0;
+    }
+    case "finish":
+      out(fmt.formatFinish(store.finishThread(arg ?? store.current().id)));
+      return 0;
+    case "reopen": {
+      const t = store.reopenThread(need(arg, "THREAD_ID"));
+      out(`Reopened ${t.id} "${t.title}".`);
       return 0;
     }
     case "rename": {

@@ -81,6 +81,29 @@ server.registerTool(
 );
 
 server.registerTool(
+  "finish_thread",
+  {
+    description:
+      "Mark a thread (default: the bound one) done when its goal is met, so it stops auto-resuming. Reports how many nodes are still open. reopen_thread undoes it.",
+    inputSchema: { thread_id: z.string().optional() },
+  },
+  ({ thread_id }) => run(() => fmt.formatFinish(store.finishThread(thread_id ?? store.current().id))),
+);
+
+server.registerTool(
+  "reopen_thread",
+  {
+    description: "Reactivate a done or parked thread.",
+    inputSchema: { thread_id: z.string() },
+  },
+  ({ thread_id }) =>
+    run(() => {
+      const t = store.reopenThread(thread_id);
+      return `Reopened ${t.id} "${t.title}".`;
+    }),
+);
+
+server.registerTool(
   "rename_thread",
   {
     description: "Change a thread's title and/or goal (default: the bound one).",

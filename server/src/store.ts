@@ -268,6 +268,23 @@ export class Store {
     return this.getThread(threadId);
   }
 
+  /** Mark a thread done so it stops auto-resuming. Returns it with the count of still-open nodes. */
+  finishThread(threadId: string): { thread: Thread; open: number } {
+    const t = this.getThread(threadId);
+    if (t.status === "done") throw new PlantrailError(`${t.id} is already done. \`plantrail reopen ${t.id}\` reactivates it.`);
+    const { n } = this.db
+      .prepare("SELECT COUNT(*) AS n FROM nodes WHERE thread_id = ? AND status IN ('open','active','blocked')")
+      .get(t.id) as { n: number };
+    return { thread: this.setThreadStatus(t.id, "done"), open: n };
+  }
+
+  /** Reactivate a done (or parked) thread. */
+  reopenThread(threadId: string): Thread {
+    const t = this.getThread(threadId);
+    if (t.status === "active") throw new PlantrailError(`${t.id} is already active.`);
+    return this.setThreadStatus(t.id, "active");
+  }
+
   /** Change a thread's title and/or goal; omitted fields are left as-is. */
   renameThread(threadId: string, title?: string, goal?: string): Thread {
     if (title === undefined && goal === undefined) throw new PlantrailError("Nothing to change: give a title and/or goal");

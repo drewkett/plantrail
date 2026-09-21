@@ -62,3 +62,8 @@ export function formatSearch(hits: SearchHit[], all?: boolean): string {
     .map((h) => `${line(h.node)}${all ? ` (${h.node.thread_id} "${h.thread_title}")` : ""}\n    ${h.snippet.replace(/\s+/g, " ")}`)
     .join("\n");
 }
+
+export function formatFinish(r: { thread: Thread; open: number }): string {
+  const left = r.open ? ` (${r.open} node${r.open === 1 ? "" : "s"} still open)` : "";
+  return `Finished ${r.thread.id} "${r.thread.title}"${left}. \`plantrail reopen ${r.thread.id}\` reactivates it.`;
+}
