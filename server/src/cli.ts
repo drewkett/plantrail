@@ -16,6 +16,7 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   rename [TITLE] [--goal G]                change the bound thread's title and/or goal (or --thread ID)
   link [THREAD_ID] [--prune]               link this dir/repo to a thread (default: bound), e.g. after
                                            a repo moved; --prune drops links to paths that no longer exist
+  unlink KIND:VALUE                        remove one link, as printed by 'link' (or --thread ID)
   add TITLE [--kind K] [--parent ID] [--body B] [--priority N] [--blocks ID,..] [--blocked-by ID,..]
   add -                                    add items from a JSON array on stdin
                                            ({title, kind?, parent?, body?, priority?, blocks?, blocked_by?};
@@ -221,6 +222,13 @@ function main(argv = process.argv.slice(2)): number {
       if (r.added.length) out(`Added: ${fmt(r.added)}`);
       if (r.removed.length) out(`Removed: ${fmt(r.removed)}`);
       out(`Links: ${fmt(r.links) || "(none)"}`);
+      return 0;
+    }
+    case "unlink": {
+      if (!arg) throw new Error("Missing link (kind:value). Run 'plantrail link' to list links.");
+      const r = store.unlink(v.thread, arg);
+      out(`Removed: ${r.removed.kind}:${r.removed.value}`);
+      out(`Links: ${r.links.map((k) => `${k.kind}:${k.value}`).join(", ") || "(none)"}`);
       return 0;
     }
     case "add": {

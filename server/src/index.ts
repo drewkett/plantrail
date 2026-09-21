@@ -97,6 +97,19 @@ server.registerTool(
 );
 
 server.registerTool(
+  "unlink",
+  {
+    description: "Remove one link from a thread (default: the bound one), given as kind:value exactly as link prints it, e.g. a stale repo URL.",
+    inputSchema: { link: z.string(), thread_id: z.string().optional() },
+  },
+  ({ link, thread_id }) =>
+    run(() => {
+      const r = store.unlink(thread_id, link);
+      return `Removed: ${r.removed.kind}:${r.removed.value}\nLinks: ${r.links.map((k) => `${k.kind}:${k.value}`).join(", ") || "(none)"}`;
+    }),
+);
+
+server.registerTool(
   "link",
   {
     description:

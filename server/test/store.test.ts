@@ -317,6 +317,16 @@ test("link: relinks after a move, prunes dead paths, resume self-heals via other
   assert.match(new Store(db, dir, store.now).resume("s9"), /^\[plantrail\] t1/);
 });
 
+test("unlink removes one link by kind:value", () => {
+  const { store } = setup();
+  store.addLink("t1", { kind: "repo", value: "https://example.com/old.git" });
+  const r = store.unlink("t1", "repo:https://example.com/old.git");
+  assert.deepEqual(r.removed, { kind: "repo", value: "https://example.com/old.git" });
+  assert.ok(!r.links.some((l) => l.value.includes("old.git")));
+  assert.throws(() => store.unlink("t1", "repo:https://example.com/old.git"), /has no link/);
+  assert.throws(() => store.unlink("t1", "nocolon"), /kind:value/);
+});
+
 test("legacy ~/.autoplan home moves once and drops old shim", () => {
   const root = mkdtempSync(join(tmpdir(), "plantrail-home-"));
   const legacy = join(root, ".autoplan");
