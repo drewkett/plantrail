@@ -1,0 +1,8 @@
+{
+  "name": "autoplan-dev",
+  "description": "Local dev marketplace for autoplan",
+  "owner": { "name": "Andrew Burkett" },
+  "plugins": [
+    { "name": "autoplan", "source": "./", "description": "Queryable state for long-running tasks and research." }
+  ]
+}

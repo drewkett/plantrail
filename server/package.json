@@ -1,0 +1,27 @@
+{
+  "name": "autoplan-server",
+  "version": "0.1.0",
+  "description": "autoplan MCP server + CLI",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "build": "esbuild src/index.ts src/cli.ts --bundle --platform=node --format=esm --target=node22 --minify --outdir=dist --banner:js=\"import{createRequire}from\\\"module\\\";const require=createRequire(import.meta.url);\"",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/"
+  },
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  }
+}
