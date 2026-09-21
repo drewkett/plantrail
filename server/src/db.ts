@@ -85,6 +85,7 @@ const MIGRATIONS: string[] = [
     INSERT INTO nodes_fts(rowid, title, summary, body) VALUES (new.rowid, new.title, new.summary, new.body);
   END;
   `,
+  `ALTER TABLE nodes ADD COLUMN confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1));`,
 ];
 
 export function openDb(path?: string): DB {

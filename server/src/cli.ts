@@ -16,6 +16,8 @@ const USAGE = `usage: autoplan <command> [args] [--cwd DIR] [--thread ID]
                                             "#i" refers to the i-th item of the same array)
   start ID                                 mark active (refuses if blocked)
   done ID --summary S [--ref R]...         complete; summary required
+  finding ID TEXT [--confidence 0..1] [--source S]...
+                                           record a finding under question/node ID
   update ID [--title T] [--body B] [--status open|blocked|abandoned] [--priority N] [--summary S] [--kind K]
   next [-n N]                              ranked options to work on next
   get ID [--depth D]                       full node detail (+ subtree)
@@ -108,6 +110,8 @@ function main(argv = process.argv.slice(2)): number {
       "blocked-by": { type: "string" },
       summary: { type: "string" },
       ref: { type: "string", multiple: true },
+      confidence: { type: "string" },
+      source: { type: "string", multiple: true },
       title: { type: "string" },
       status: { type: "string" },
       n: { type: "string", short: "n" },
@@ -199,6 +203,17 @@ function main(argv = process.argv.slice(2)): number {
       if (unblocked.length) out(`Unblocked: ${unblocked.map(line).join("; ")}`);
       if (parentReady)
         out(`All children of ${parentReady.id} "${parentReady.title}" are resolved — consider: autoplan done ${parentReady.id}`);
+      return 0;
+    }
+    case "finding": {
+      const [id, ...rest] = args;
+      let conf: number | undefined;
+      if (v.confidence !== undefined) {
+        conf = Number(v.confidence);
+        if (Number.isNaN(conf)) throw new AutoplanError("--confidence must be a number between 0 and 1");
+      }
+      const n = store.recordFinding(need(id, "ID"), need(rest.join(" ") || undefined, "TEXT"), conf, v.source);
+      out(`Recorded ${line(n)}${n.confidence != null ? ` (conf ${n.confidence})` : ""} under ${n.parent_id}`);
       return 0;
     }
     case "update": {

@@ -1,6 +1,5 @@
 {
   "name": "autoplan",
-  "version": "0.2.1",
   "description": "Queryable state for long-running tasks and research that survives /clear, compaction, and new sessions.",
   "author": {
     "name": "Andrew Burkett"

@@ -24,6 +24,8 @@ export interface Node {
   summary: string | null;
   body: string | null;
   refs: string | null;
+  /** 0..1, findings only. */
+  confidence: number | null;
   priority: number;
   created_at: string;
   updated_at: string;
@@ -344,6 +346,41 @@ export class Store {
     return this.children(parentId).every((c) => RESOLVED.includes(c.status)) ? parent : null;
   }
 
+  /**
+   * Record a finding under a question (or any node it informs). Findings are
+   * facts, so they are created done: the text is the summary, sources the refs.
+   */
+  recordFinding(parentId: string, text: string, confidence?: number, sources?: string[]): Node {
+    if (!text?.trim()) throw new AutoplanError("A finding needs text");
+    if (confidence !== undefined && !(confidence >= 0 && confidence <= 1))
+      throw new AutoplanError("confidence must be between 0 and 1");
+    const parent = this.getNode(parentId);
+    if (parent.kind === "finding") throw new AutoplanError(`${parentId} is a finding; attach to the question it informs`);
+    const t = text.trim();
+    return this.tx(() => {
+      const id = this.nextId("n");
+      const now = this.ts();
+      this.db
+        .prepare(
+          `INSERT INTO nodes (id, thread_id, parent_id, kind, title, status, summary, refs, confidence, created_at, updated_at)
+           VALUES (?, ?, ?, 'finding', ?, 'done', ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          parent.thread_id,
+          parent.id,
+          clip(t.split("\n")[0], 100),
+          t,
+          sources?.length ? JSON.stringify(sources) : null,
+          confidence ?? null,
+          now,
+          now,
+        );
+      this.touch(parent.thread_id);
+      return this.getNode(id);
+    });
+  }
+
   update(
     id: string,
     fields: { title?: string; body?: string; status?: NodeStatus; priority?: number; summary?: string; kind?: NodeKind },
@@ -476,7 +513,7 @@ export class Store {
   getText(id: string, depth = 0): string {
     const n = this.getNode(id);
     const lines = [
-      `${n.id} [${n.kind}/${n.status}${n.priority ? ` p${n.priority}` : ""}] ${n.title}`,
+      `${n.id} [${n.kind}/${n.status}${n.priority ? ` p${n.priority}` : ""}${n.confidence != null ? ` conf ${n.confidence}` : ""}] ${n.title}`,
       `thread ${n.thread_id}${n.parent_id ? `, parent ${n.parent_id}` : ""}, updated ${n.updated_at.slice(0, 16)}`,
     ];
     if (n.body) lines.push(`Body: ${n.body}`);
@@ -490,7 +527,7 @@ export class Store {
     if (blocks.length) lines.push(`Blocks: ${blocks.map((b) => b.to_id).join(", ")}`);
     const walk = (pid: string, d: number, indent: string) => {
       for (const c of this.children(pid)) {
-        lines.push(`${indent}${fmt(c)}${c.summary ? ` — ${clip(c.summary, 120)}` : ""}`);
+        lines.push(`${indent}${fmt(c)}${c.confidence != null ? ` (conf ${c.confidence})` : ""}${c.summary ? ` — ${clip(c.summary, 120)}` : ""}`);
         if (d > 1) walk(c.id, d - 1, indent + "  ");
       }
     };

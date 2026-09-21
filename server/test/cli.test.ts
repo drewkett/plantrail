@@ -28,6 +28,8 @@ test("cli: create, add via stdin, workflow rules, status", () => {
   assert.match(ap(["next"]).out, /^n2 /);
   assert.equal(ap(["checkpoint", "note"]).code, 0);
   assert.match(ap(["status"]).out, /Last checkpoint .*: note/);
+  assert.equal(ap(["finding", "n2", "it", "works", "--confidence", "0.7", "--source", "a.md"]).out, "Recorded n3 [finding/done] it works (conf 0.7) under n2");
+  assert.match(ap(["finding", "n2", "x", "--confidence", "high"]).err, /must be a number/);
 });
 
 test("cli: bad input exits 1/2 without a stack trace", () => {

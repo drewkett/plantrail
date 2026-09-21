@@ -142,3 +142,29 @@ test("current() falls back to latest binding in cwd", () => {
   assert.equal(server.current().id, "t1");
   assert.throws(() => new Store(db, join(dir, "elsewhere")).current(), /No thread bound/);
 });
+
+test("recordFinding attaches a done finding with confidence and sources", () => {
+  const { store } = setup();
+  const [q] = store.add([{ title: "Is WAL safe on NFS?", kind: "question" }]);
+  const f = store.recordFinding(q.id, "No: WAL needs shared memory.\nSee docs.", 0.9, ["https://sqlite.org/wal.html"]);
+  assert.equal(f.kind, "finding");
+  assert.equal(f.status, "done");
+  assert.equal(f.parent_id, q.id);
+  assert.equal(f.title, "No: WAL needs shared memory.");
+  assert.equal(f.confidence, 0.9);
+  assert.deepEqual(JSON.parse(f.refs!), ["https://sqlite.org/wal.html"]);
+  assert.match(store.getText(q.id, 1), /\(finding\) No: WAL.*\(conf 0\.9\)/);
+  // Findings don't hold up closing the question.
+  assert.equal(store.done(q.id, "answered").node.status, "done");
+});
+
+test("recordFinding validates input", () => {
+  const { store } = setup();
+  const [q] = store.add([{ title: "q", kind: "question" }]);
+  assert.throws(() => store.recordFinding(q.id, " "), /needs text/);
+  assert.throws(() => store.recordFinding(q.id, "x", 1.5), /between 0 and 1/);
+  assert.throws(() => store.recordFinding("n99", "x"), /No node n99/);
+  const f = store.recordFinding(q.id, "x");
+  assert.equal(f.confidence, null);
+  assert.throws(() => store.recordFinding(f.id, "y"), /is a finding/);
+});
