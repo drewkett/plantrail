@@ -4,6 +4,7 @@ import type { DB } from "./db.ts";
 import { locationKeys, type LinkKey } from "./repo.ts";
 
 export type NodeKind = "task" | "question" | "finding" | "decision";
+export type EdgeType = "blocks" | "derived_from" | "contradicts";
 export type NodeStatus = "open" | "active" | "blocked" | "done" | "abandoned";
 export type ThreadStatus = "active" | "parked" | "done";
 
@@ -568,6 +569,50 @@ export class Store {
       if (p.id === node.id) throw new PlantrailError(`Can't move ${node.id} under its own subtree (${parentId})`);
   }
 
+  /**
+   * Add an edge after creation. `blocks` stays within a thread and may not form
+   * a cycle; derived_from/contradicts may cross threads (reusing research).
+   * `answers` edges are managed by recordFinding.
+   */
+  addEdge(from: string, type: EdgeType, to: string): { from: Node; to: Node } {
+    const [a, b] = [this.getNode(from), this.getNode(to)];
+    if (a.id === b.id) throw new PlantrailError("A node cannot have an edge to itself");
+    if (type === "blocks") {
+      if (a.thread_id !== b.thread_id) throw new PlantrailError(`${to} belongs to thread ${b.thread_id}; blocks edges stay within a thread`);
+      const reach = this.db
+        .prepare(
+          `WITH RECURSIVE r(id) AS (SELECT ? UNION SELECT e.to_id FROM edges e JOIN r ON e.from_id = r.id WHERE e.type = 'blocks')
+           SELECT 1 FROM r WHERE id = ?`,
+        )
+        .get(b.id, a.id);
+      if (reach) throw new PlantrailError(`${to} already (transitively) blocks ${from}; that would be a cycle`);
+    }
+    const r = this.db.prepare("INSERT OR IGNORE INTO edges (from_id, to_id, type) VALUES (?, ?, ?)").run(a.id, b.id, type);
+    if (!r.changes) throw new PlantrailError(`${from} ${type} ${to} already exists`);
+    this.touch(a.thread_id);
+    return { from: a, to: this.getNode(b.id) };
+  }
+
+  /** Remove an edge. Removing the last open blocker reopens a `blocked` target. */
+  removeEdge(from: string, type: EdgeType, to: string): { unblocked: Node[] } {
+    const a = this.getNode(from);
+    return this.tx(() => {
+      const r = this.db.prepare("DELETE FROM edges WHERE from_id = ? AND to_id = ? AND type = ?").run(from, to, type);
+      if (!r.changes) throw new PlantrailError(`No edge ${from} ${type} ${to}`);
+      const now = this.ts();
+      let unblocked: Node[] = [];
+      if (type === "blocks" && !RESOLVED.includes(a.status)) {
+        const t = this.getNode(to);
+        if (!RESOLVED.includes(t.status) && !this.blockers(to).length) {
+          if (t.status === "blocked") this.db.prepare("UPDATE nodes SET status = 'open', updated_at = ? WHERE id = ?").run(now, to);
+          unblocked = [this.getNode(to)];
+        }
+      }
+      this.touch(a.thread_id);
+      return { unblocked };
+    });
+  }
+
   /** Delete a mistaken node. Only leaves with no edges, so nothing else loses context. */
   deleteNode(id: string): Node {
     const node = this.getNode(id);
@@ -780,6 +825,13 @@ export class Store {
       .prepare("SELECT to_id FROM edges WHERE from_id = ? AND type = 'blocks'")
       .all(id) as { to_id: string }[];
     if (blocks.length) lines.push(`Blocks: ${blocks.map((b) => b.to_id).join(", ")}`);
+    const rel = this.db
+      .prepare(
+        `SELECT from_id, to_id, type FROM edges WHERE (from_id = ? OR to_id = ?) AND type IN ('derived_from','contradicts')`,
+      )
+      .all(id, id) as { from_id: string; to_id: string; type: string }[];
+    for (const e of rel)
+      lines.push(e.from_id === id ? `${e.type === "contradicts" ? "Contradicts" : "Derived from"}: ${e.to_id}` : `${e.type === "contradicts" ? "Contradicted by" : "Source of"}: ${e.from_id}`);
     const walk = (pid: string, d: number, indent: string) => {
       for (const c of this.children(pid)) {
         lines.push(`${indent}${fmt(c)}${c.confidence != null ? ` (conf ${c.confidence})` : ""}${c.summary ? ` — ${clip(c.summary, 120)}` : ""}`);

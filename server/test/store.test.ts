@@ -375,3 +375,21 @@ test("move and delete nodes", () => {
   assert.throws(() => store.getNode(b.id));
   assert.equal(store.search("b").length, 0);
 });
+
+test("add and remove edges", () => {
+  const { store } = setup();
+  const [a, b, c] = store.add([{ title: "a" }, { title: "b" }, { title: "c" }]);
+  store.addEdge(a.id, "blocks", b.id);
+  store.addEdge(b.id, "blocks", c.id);
+  assert.throws(() => store.addEdge(c.id, "blocks", a.id), /cycle/);
+  assert.throws(() => store.addEdge(a.id, "blocks", b.id), /already exists/);
+  assert.throws(() => store.addEdge(a.id, "blocks", a.id), /itself/);
+  assert.throws(() => store.start(b.id), /blocked by/);
+  store.update(b.id, { status: "blocked" });
+  assert.deepEqual(store.removeEdge(a.id, "blocks", b.id).unblocked.map((n) => n.id), [b.id]);
+  assert.equal(store.getNode(b.id).status, "open");
+  assert.throws(() => store.removeEdge(a.id, "blocks", b.id), /No edge/);
+  store.addEdge(c.id, "contradicts", a.id);
+  assert.match(store.getText(c.id), /Contradicts: n1/);
+  assert.match(store.getText(a.id), /Contradicted by: n3/);
+});

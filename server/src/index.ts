@@ -245,6 +245,26 @@ server.registerTool(
 );
 
 server.registerTool(
+  "edge",
+  {
+    description:
+      "Add (or with remove, delete) an edge between nodes. from blocks to: to can't start until from is resolved (same thread, no cycles). from derived_from to / from contradicts to: record how findings relate (may cross threads). Removing a node's last blocker reopens it.",
+    inputSchema: {
+      from: z.string(),
+      type: z.enum(["blocks", "derived_from", "contradicts"]),
+      to: z.string(),
+      remove: z.boolean().default(false),
+    },
+  },
+  ({ from, type, to, remove }) =>
+    run(() => {
+      if (remove) return fmt.formatEdge(from, type, to, true, store.removeEdge(from, type, to).unblocked);
+      store.addEdge(from, type, to);
+      return fmt.formatEdge(from, type, to, false);
+    }),
+);
+
+server.registerTool(
   "delete_node",
   {
     description:

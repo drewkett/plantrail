@@ -6,7 +6,7 @@ import { plantrailHome, openDb } from "./db.ts";
 import { exportHtml } from "./html.ts";
 import { serve } from "./serve.ts";
 import * as fmt from "./format.ts";
-import { PlantrailError, Store, type AddItem, type NodeKind, type NodeStatus } from "./store.ts";
+import { PlantrailError, Store, type AddItem, type EdgeType, type NodeKind, type NodeStatus } from "./store.ts";
 
 const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   status                                   compact view of the bound thread
@@ -31,6 +31,7 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
                                            (--answers: also close question ID with it)
   update ID [--title T] [--body B] [--status open|blocked|abandoned] [--priority N] [--summary S] [--kind K]
             [--parent ID|none]             (--parent moves the node; none = top level)
+  edge FROM TYPE TO [--remove]             add/remove an edge; TYPE: blocks, derived_from, contradicts
   delete ID                                delete a mistaken leaf node with no edges
   next [-n N]                              ranked options to work on next
   get ID [--depth D]                       full node detail (+ subtree)
@@ -45,6 +46,7 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   stop --hook                              Stop hook: remind once to checkpoint after changes
   precompact --hook                        PreCompact hook: auto-checkpoint if anything changed`;
 
+const EDGE_TYPES = ["blocks", "derived_from", "contradicts"];
 const KINDS = ["task", "question", "finding", "decision"];
 
 function readStdin(): string {
@@ -124,6 +126,7 @@ function main(argv = process.argv.slice(2)): number {
       goal: { type: "string" },
       "no-link": { type: "boolean" },
       prune: { type: "boolean" },
+      remove: { type: "boolean" },
       kind: { type: "string" },
       parent: { type: "string" },
       body: { type: "string" },
@@ -291,6 +294,16 @@ function main(argv = process.argv.slice(2)): number {
         parent: v.parent === "none" ? null : v.parent,
       });
       out(fmt.formatUpdate(r));
+      return 0;
+    }
+    case "edge": {
+      const [from, type, to] = [need(args[0], "FROM"), need(args[1], "TYPE"), need(args[2], "TO")];
+      if (!EDGE_TYPES.includes(type)) throw new PlantrailError(`TYPE must be one of ${EDGE_TYPES.join(", ")}`);
+      if (v.remove) out(fmt.formatEdge(from, type, to, true, store.removeEdge(from, type as EdgeType, to).unblocked));
+      else {
+        store.addEdge(from, type as EdgeType, to);
+        out(fmt.formatEdge(from, type, to, false));
+      }
       return 0;
     }
     case "delete": {

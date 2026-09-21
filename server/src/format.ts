@@ -67,3 +67,7 @@ export function formatFinish(r: { thread: Thread; open: number }): string {
   const left = r.open ? ` (${r.open} node${r.open === 1 ? "" : "s"} still open)` : "";
   return `Finished ${r.thread.id} "${r.thread.title}"${left}. \`plantrail reopen ${r.thread.id}\` reactivates it.`;
 }
+
+export function formatEdge(from: string, type: string, to: string, removed: boolean, unblocked: Node[] = []): string {
+  return lines([`${removed ? "Removed" : "Added"} ${from} ${type} ${to}.`, unblockedLine(unblocked)]);
+}
