@@ -324,7 +324,7 @@ test("unlink removes one link by kind:value", () => {
   assert.deepEqual(r.removed, { kind: "repo", value: "https://example.com/old.git" });
   assert.ok(!r.links.some((l) => l.value.includes("old.git")));
   assert.throws(() => store.unlink("t1", "repo:https://example.com/old.git"), /has no link/);
-  assert.throws(() => store.unlink("t1", "nocolon"), /kind:value/);
+  assert.throws(() => store.unlink("t1", "nocolon"), (e: Error) => e instanceof PlantrailError && /kind:value/.test(e.message));
 });
 
 test("legacy ~/.autoplan home moves once and drops old shim", () => {

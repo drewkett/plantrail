@@ -82,3 +82,13 @@ test("cli: export md and json", () => {
   assert.equal(j.checkpoints[0].note, "cp note");
   assert.match(ap(["export", "--format", "xml"]).err, /md, json or html/);
 });
+
+test("cli: unlink reports bad input as a clean error", () => {
+  const ap = setup();
+  ap(["create", "Demo", "--goal", "g"]);
+  for (const args of [["unlink"], ["unlink", "nocolon"], ["unlink", "repo:nope"]]) {
+    const r = ap(args);
+    assert.equal(r.code, 1);
+    assert.doesNotMatch(r.err, /\n\s+at /);
+  }
+});

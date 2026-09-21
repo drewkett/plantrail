@@ -212,10 +212,10 @@ export class Store {
   unlink(threadId: string | undefined, spec: string): { removed: LinkKey; links: LinkKey[] } {
     const t = threadId ? this.getThread(threadId) : this.current();
     const i = spec.indexOf(":");
-    if (i <= 0) throw new Error(`Link must be kind:value (e.g. repo:https://...), got '${spec}'`);
+    if (i <= 0) throw new PlantrailError(`Link must be kind:value (e.g. repo:https://...), got '${spec}'`);
     const removed = { kind: spec.slice(0, i), value: spec.slice(i + 1) } as LinkKey;
     const r = this.db.prepare("DELETE FROM links WHERE thread_id = ? AND kind = ? AND value = ?").run(t.id, removed.kind, removed.value);
-    if (!r.changes) throw new Error(`${t.id} has no link ${spec}`);
+    if (!r.changes) throw new PlantrailError(`${t.id} has no link ${spec}`);
     const links = this.db.prepare("SELECT kind, value FROM links WHERE thread_id = ? ORDER BY kind, value").all(t.id).map((l) => ({ ...l })) as unknown as LinkKey[];
     return { removed, links };
   }

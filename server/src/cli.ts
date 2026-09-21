@@ -225,7 +225,7 @@ function main(argv = process.argv.slice(2)): number {
       return 0;
     }
     case "unlink": {
-      if (!arg) throw new Error("Missing link (kind:value). Run 'plantrail link' to list links.");
+      if (!arg) throw new PlantrailError("Missing link (kind:value). Run 'plantrail link' to list links.");
       const r = store.unlink(v.thread, arg);
       out(`Removed: ${r.removed.kind}:${r.removed.value}`);
       out(`Links: ${r.links.map((k) => `${k.kind}:${k.value}`).join(", ") || "(none)"}`);
