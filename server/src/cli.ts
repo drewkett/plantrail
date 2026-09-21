@@ -11,6 +11,8 @@ const USAGE = `usage: autoplan <command> [args] [--cwd DIR] [--thread ID]
   create TITLE --goal G [--no-link]        create thread, link this dir, bind
   bind THREAD_ID                           bind this dir to a thread (reactivates a parked one)
   park [THREAD_ID]                         park a thread (default: bound); threads idle 30d auto-park
+  link [THREAD_ID] [--prune]               link this dir/repo to a thread (default: bound), e.g. after
+                                           a repo moved; --prune drops links to paths that no longer exist
   add TITLE [--kind K] [--parent ID] [--body B] [--priority N] [--blocks ID,..] [--blocked-by ID,..]
   add -                                    add items from a JSON array on stdin
                                            ({title, kind?, parent?, body?, priority?, blocks?, blocked_by?};
@@ -111,6 +113,7 @@ function main(argv = process.argv.slice(2)): number {
       all: { type: "boolean" },
       goal: { type: "string" },
       "no-link": { type: "boolean" },
+      prune: { type: "boolean" },
       kind: { type: "string" },
       parent: { type: "string" },
       body: { type: "string" },
@@ -200,6 +203,14 @@ function main(argv = process.argv.slice(2)): number {
     case "park": {
       const t = store.setThreadStatus(arg ?? store.current().id, "parked");
       out(`Parked ${t.id} "${t.title}". \`autoplan bind ${t.id}\` reactivates it.`);
+      return 0;
+    }
+    case "link": {
+      const r = store.relink(arg, !!v.prune);
+      const fmt = (ks: { kind: string; value: string }[]) => ks.map((k) => `${k.kind}:${k.value}`).join(", ");
+      if (r.added.length) out(`Added: ${fmt(r.added)}`);
+      if (r.removed.length) out(`Removed: ${fmt(r.removed)}`);
+      out(`Links: ${fmt(r.links) || "(none)"}`);
       return 0;
     }
     case "add": {

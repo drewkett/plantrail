@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import type { DB } from "./db.ts";
 import { locationKeys, type LinkKey } from "./repo.ts";
 
@@ -184,6 +186,28 @@ export class Store {
     );
   }
 
+  /**
+   * Link a thread (default: bound) to the current location, e.g. after a repo
+   * moved and its old path no longer matches. With `prune`, drop repo/dir links
+   * whose path no longer exists. Returns what changed and the resulting links.
+   */
+  relink(threadId?: string, prune = false): { added: LinkKey[]; removed: LinkKey[]; links: LinkKey[] } {
+    const t = threadId ? this.getThread(threadId) : this.current();
+    return this.tx(() => {
+      const links = () =>
+        this.db.prepare("SELECT kind, value FROM links WHERE thread_id = ? ORDER BY kind, value").all(t.id).map((l) => ({ ...l })) as unknown as LinkKey[];
+      const before = new Set(links().map((l) => `${l.kind}\0${l.value}`));
+      const added = locationKeys(this.cwd).filter((k) => !before.has(`${k.kind}\0${k.value}`));
+      for (const k of added) this.addLink(t.id, k);
+      const removed = prune
+        ? links().filter((l) => (l.kind === "repo" || l.kind === "dir") && isAbsolute(l.value) && !existsSync(l.value))
+        : [];
+      const del = this.db.prepare("DELETE FROM links WHERE thread_id = ? AND kind = ? AND value = ?");
+      for (const l of removed) del.run(t.id, l.kind, l.value);
+      return { added, removed, links: links() };
+    });
+  }
+
   listThreads(filter: "active" | "parked" | "done" | "all" = "active"): Thread[] {
     const sql =
       filter === "all"
@@ -257,9 +281,11 @@ export class Store {
       this.bound = recent.thread_id;
       return this.getThread(recent.thread_id);
     }
-    const linked = this.threadsForLocation(locationKeys(this.cwd));
+    const keys = locationKeys(this.cwd);
+    const linked = this.threadsForLocation(keys);
     if (linked.length === 1) {
       this.bound = linked[0].id;
+      for (const k of keys) this.addLink(linked[0].id, k);
       return linked[0];
     }
     const hint = linked.length
@@ -844,6 +870,9 @@ export class Store {
       }
     }
     if (linked.length === 1) {
+      // Matched on some key (e.g. the origin URL after a move): add the others so
+      // this location keeps matching even if that key changes later.
+      for (const k of keys) this.addLink(linked[0].id, k);
       this.bindInner(linked[0].id, sessionId);
       return this.statusText(linked[0].id);
     }

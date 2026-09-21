@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb } from "../src/db.ts";
@@ -280,4 +280,22 @@ test("resume auto-parks idle threads; bind reactivates; status flags long-active
   assert.match(fresh.resume("s1"), /^\[autoplan\] t1 "Test" \(active\)/);
   store.setThreadStatus("t1", "parked");
   assert.deepEqual(fresh.listThreads("parked").map((t) => t.id), ["t1"]);
+});
+
+test("link: relinks after a move, prunes dead paths, resume self-heals via other keys", () => {
+  const { store, db, dir } = setup();
+  const moved = mkdtempSync(join(tmpdir(), "autoplan-moved-"));
+  const here = new Store(db, moved, store.now);
+  assert.throws(() => here.current(), /No thread bound/);
+  here.addLink("t1", { kind: "dir", value: "/nonexistent/old/path" });
+  const r = here.relink("t1", true);
+  assert.equal(r.added.length, 1);
+  assert.deepEqual(r.removed, [{ kind: "dir", value: "/nonexistent/old/path" }]);
+  assert.equal(r.links.length, 2);
+  assert.equal(new Store(db, moved, store.now).current().id, "t1");
+  assert.equal(here.relink("t1").added.length, 0);
+  // resume matching on one key adds the location's other keys
+  db.prepare("DELETE FROM links WHERE value = ?").run(realpathSync(dir));
+  here.addLink("t1", { kind: "dir", value: realpathSync(dir) });
+  assert.match(new Store(db, dir, store.now).resume("s9"), /^\[autoplan\] t1/);
 });

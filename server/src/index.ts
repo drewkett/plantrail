@@ -84,6 +84,27 @@ server.registerTool(
 );
 
 server.registerTool(
+  "link",
+  {
+    description:
+      "Link the current repo/dir to a thread (default: the bound one) so sessions here resume it, e.g. after a repo moved. prune drops links to paths that no longer exist.",
+    inputSchema: { thread_id: z.string().optional(), prune: z.boolean().default(false) },
+  },
+  ({ thread_id, prune }) =>
+    run(() => {
+      const r = store.relink(thread_id, prune);
+      const fmt = (ks: { kind: string; value: string }[]) => ks.map((k) => `${k.kind}:${k.value}`).join(", ");
+      return [
+        r.added.length ? `Added: ${fmt(r.added)}` : null,
+        r.removed.length ? `Removed: ${fmt(r.removed)}` : null,
+        `Links: ${fmt(r.links) || "(none)"}`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }),
+);
+
+server.registerTool(
   "status",
   {
     description:
