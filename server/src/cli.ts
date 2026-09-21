@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { plantrailHome, openDb } from "./db.ts";
 import { exportHtml } from "./html.ts";
 import { serve } from "./serve.ts";
-import { PlantrailError, Store, type AddItem, type Node, type NodeKind, type NodeStatus } from "./store.ts";
+import * as fmt from "./format.ts";
+import { PlantrailError, Store, type AddItem, type NodeKind, type NodeStatus } from "./store.ts";
 
 const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   status                                   compact view of the bound thread
@@ -67,7 +68,7 @@ function installShim(): void {
   }
 }
 
-const line = (n: Node) => `${n.id} [${n.kind}/${n.status}] ${n.title}`;
+const doneHint = (id: string) => `plantrail done ${id}`;
 
 function need(v: string | undefined, what: string): string {
   if (!v) throw new PlantrailError(`Missing ${what}. Run 'plantrail help' for usage.`);
@@ -192,9 +193,7 @@ function main(argv = process.argv.slice(2)): number {
       try {
         bound = store.current().id;
       } catch {}
-      if (!ts.length) out("No threads.");
-      for (const t of ts)
-        out(`${t.id}${t.id === bound ? "*" : ""} [${t.status}] ${t.title} (touched ${t.touched_at.slice(0, 10)})`);
+      out(fmt.formatThreads(ts, bound));
       return 0;
     }
     case "create": {
@@ -213,22 +212,16 @@ function main(argv = process.argv.slice(2)): number {
     }
     case "rename": {
       const t = store.renameThread(store.current().id, arg, v.goal);
-      out(`Updated ${t.id} "${t.title}"${v.goal !== undefined ? ` — goal: ${t.goal}` : ""}.`);
+      out(fmt.formatRename(t, v.goal !== undefined));
       return 0;
     }
     case "link": {
-      const r = store.relink(arg, !!v.prune);
-      const fmt = (ks: { kind: string; value: string }[]) => ks.map((k) => `${k.kind}:${k.value}`).join(", ");
-      if (r.added.length) out(`Added: ${fmt(r.added)}`);
-      if (r.removed.length) out(`Removed: ${fmt(r.removed)}`);
-      out(`Links: ${fmt(r.links) || "(none)"}`);
+      out(fmt.formatRelink(store.relink(arg, !!v.prune)));
       return 0;
     }
     case "unlink": {
       if (!arg) throw new PlantrailError("Missing link (kind:value). Run 'plantrail link' to list links.");
-      const r = store.unlink(v.thread, arg);
-      out(`Removed: ${r.removed.kind}:${r.removed.value}`);
-      out(`Links: ${r.links.map((k) => `${k.kind}:${k.value}`).join(", ") || "(none)"}`);
+      out(fmt.formatUnlink(store.unlink(v.thread, arg)));
       return 0;
     }
     case "add": {
@@ -246,21 +239,15 @@ function main(argv = process.argv.slice(2)): number {
                 blocked_by: list(v["blocked-by"]),
               },
             ];
-      for (const n of store.add(items)) out(line(n));
+      for (const n of store.add(items)) out(fmt.line(n));
       return 0;
     }
     case "start": {
-      const { node, demoted } = store.start(need(arg, "ID"));
-      out(`Started ${line(node)}`);
-      if (demoted.length) out(`Returned to open: ${demoted.join(", ")}`);
+      out(fmt.formatStart(store.start(need(arg, "ID"))));
       return 0;
     }
     case "done": {
-      const { node, unblocked, parentReady } = store.done(need(arg, "ID"), need(v.summary, "--summary"), v.ref);
-      out(`Done ${line(node)}`);
-      if (unblocked.length) out(`Unblocked: ${unblocked.map(line).join("; ")}`);
-      if (parentReady)
-        out(`All children of ${parentReady.id} "${parentReady.title}" are resolved — consider: plantrail done ${parentReady.id}`);
+      out(fmt.formatDone(store.done(need(arg, "ID"), need(v.summary, "--summary"), v.ref), doneHint));
       return 0;
     }
     case "finding": {
@@ -270,26 +257,19 @@ function main(argv = process.argv.slice(2)): number {
         conf = Number(v.confidence);
         if (Number.isNaN(conf)) throw new PlantrailError("--confidence must be a number between 0 and 1");
       }
-      const { node: n, closed } = store.recordFinding(
+      out(fmt.formatFinding(store.recordFinding(
         need(id, "ID"),
         need(rest.join(" ") || undefined, "TEXT"),
         conf,
         v.source,
         v.answers,
-      );
-      out(`Recorded ${line(n)}${n.confidence != null ? ` (conf ${n.confidence})` : ""} under ${n.parent_id}`);
-      if (closed) {
-        out(`Answered ${line(closed.node)}`);
-        if (closed.unblocked.length) out(`Unblocked: ${closed.unblocked.map(line).join("; ")}`);
-        if (closed.parentReady)
-          out(`All children of ${closed.parentReady.id} "${closed.parentReady.title}" are resolved — consider: plantrail done ${closed.parentReady.id}`);
-      }
+      ), doneHint));
       return 0;
     }
     case "update": {
       if (v.status !== undefined && !["open", "blocked", "abandoned"].includes(v.status))
         throw new PlantrailError("--status must be open, blocked, or abandoned (use start/done otherwise)");
-      const { node, unblocked } = store.update(need(arg, "ID"), {
+      const r = store.update(need(arg, "ID"), {
         title: v.title,
         body: v.body,
         status: v.status as NodeStatus | undefined,
@@ -297,14 +277,11 @@ function main(argv = process.argv.slice(2)): number {
         summary: v.summary,
         kind: kindOf(v.kind),
       });
-      out(`Updated ${line(node)}`);
-      if (unblocked.length) out(`Unblocked: ${unblocked.map(line).join("; ")}`);
+      out(fmt.formatUpdate(r));
       return 0;
     }
     case "next": {
-      const opts = store.nextOptions(intOf(v.n, "-n") ?? 3);
-      if (!opts.length) out("Nothing open and unblocked.");
-      for (const o of opts) out(`${line(o.node)}  (score ${o.score}: ${o.why})`);
+      out(fmt.formatNext(store.nextOptions(intOf(v.n, "-n") ?? 3)));
       return 0;
     }
     case "get":
@@ -312,8 +289,7 @@ function main(argv = process.argv.slice(2)): number {
       return 0;
     case "search": {
       const hits = store.search(need(arg, "QUERY"), { all: v.all, kind: kindOf(v.kind), limit: intOf(v.n, "-n") ?? 10 });
-      if (!hits.length) out("No matches.");
-      for (const h of hits) out(`${line(h.node)}${v.all ? ` (${h.node.thread_id} "${h.thread_title}")` : ""}\n    ${h.snippet.replace(/\s+/g, " ")}`);
+      out(fmt.formatSearch(hits, v.all));
       return 0;
     }
     case "export": {

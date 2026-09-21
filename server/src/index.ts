@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { openDb } from "./db.ts";
+import * as fmt from "./format.ts";
 import { PlantrailError, Store, type Node } from "./store.ts";
 
 const store = new Store(openDb(), process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
@@ -18,7 +19,7 @@ function run(fn: () => string): Result {
   }
 }
 
-const line = (n: Node) => `${n.id} [${n.kind}/${n.status}] ${n.title}`;
+const doneHint = (id: string) => `done(${id}).`;
 
 const kind = z.enum(["task", "question", "finding", "decision"]);
 
@@ -48,11 +49,7 @@ server.registerTool(
   },
   ({ filter }) =>
     run(() => {
-      const ts = store.listThreads(filter);
-      if (!ts.length) return `No ${filter === "all" ? "" : filter + " "}threads.`;
-      return ts
-        .map((t) => `${t.id}${t.id === store.bound ? "*" : ""} [${t.status}] ${t.title} (touched ${t.touched_at.slice(0, 10)})`)
-        .join("\n");
+      return fmt.formatThreads(store.listThreads(filter), store.bound, `No ${filter === "all" ? "" : filter + " "}threads.`);
     }),
 );
 
@@ -91,8 +88,7 @@ server.registerTool(
   },
   ({ title, goal, thread_id }) =>
     run(() => {
-      const t = store.renameThread(thread_id ?? store.current().id, title, goal);
-      return `Updated ${t.id} "${t.title}"${goal !== undefined ? ` — goal: ${t.goal}` : ""}.`;
+      return fmt.formatRename(store.renameThread(thread_id ?? store.current().id, title, goal), goal !== undefined);
     }),
 );
 
@@ -104,8 +100,7 @@ server.registerTool(
   },
   ({ link, thread_id }) =>
     run(() => {
-      const r = store.unlink(thread_id, link);
-      return `Removed: ${r.removed.kind}:${r.removed.value}\nLinks: ${r.links.map((k) => `${k.kind}:${k.value}`).join(", ") || "(none)"}`;
+      return fmt.formatUnlink(store.unlink(thread_id, link));
     }),
 );
 
@@ -118,15 +113,7 @@ server.registerTool(
   },
   ({ thread_id, prune }) =>
     run(() => {
-      const r = store.relink(thread_id, prune);
-      const fmt = (ks: { kind: string; value: string }[]) => ks.map((k) => `${k.kind}:${k.value}`).join(", ");
-      return [
-        r.added.length ? `Added: ${fmt(r.added)}` : null,
-        r.removed.length ? `Removed: ${fmt(r.removed)}` : null,
-        `Links: ${fmt(r.links) || "(none)"}`,
-      ]
-        .filter(Boolean)
-        .join("\n");
+      return fmt.formatRelink(store.relink(thread_id, prune));
     }),
 );
 
@@ -161,7 +148,7 @@ server.registerTool(
         .min(1),
     },
   },
-  ({ items }) => run(() => store.add(items).map(line).join("\n")),
+  ({ items }) => run(() => store.add(items).map(fmt.line).join("\n")),
 );
 
 server.registerTool(
@@ -172,8 +159,7 @@ server.registerTool(
   },
   ({ id }) =>
     run(() => {
-      const { node, demoted } = store.start(id);
-      return `Started ${line(node)}${demoted.length ? `\nReturned to open: ${demoted.join(", ")}` : ""}`;
+      return fmt.formatStart(store.start(id));
     }),
 );
 
@@ -190,11 +176,7 @@ server.registerTool(
   },
   ({ id, summary, refs }) =>
     run(() => {
-      const { node, unblocked, parentReady } = store.done(id, summary, refs);
-      const out = [`Done ${line(node)}`];
-      if (unblocked.length) out.push(`Unblocked: ${unblocked.map(line).join("; ")}`);
-      if (parentReady) out.push(`All children of ${parentReady.id} "${parentReady.title}" are resolved — consider done(${parentReady.id}).`);
-      return out.join("\n");
+      return fmt.formatDone(store.done(id, summary, refs), doneHint);
     }),
 );
 
@@ -213,15 +195,7 @@ server.registerTool(
   },
   ({ id, text, confidence, sources, answers }) =>
     run(() => {
-      const { node, closed } = store.recordFinding(id, text, confidence, sources, answers ?? false);
-      const out = [`Recorded ${line(node)}${node.confidence != null ? ` (conf ${node.confidence})` : ""} under ${node.parent_id}`];
-      if (closed) {
-        out.push(`Answered ${line(closed.node)}`);
-        if (closed.unblocked.length) out.push(`Unblocked: ${closed.unblocked.map(line).join("; ")}`);
-        if (closed.parentReady)
-          out.push(`All children of ${closed.parentReady.id} "${closed.parentReady.title}" are resolved — consider done(${closed.parentReady.id}).`);
-      }
-      return out.join("\n");
+      return fmt.formatFinding(store.recordFinding(id, text, confidence, sources, answers ?? false), doneHint);
     }),
 );
 
@@ -242,8 +216,7 @@ server.registerTool(
   },
   ({ id, ...fields }) =>
     run(() => {
-      const { node, unblocked } = store.update(id, fields);
-      return `Updated ${line(node)}${unblocked.length ? `\nUnblocked: ${unblocked.map(line).join("; ")}` : ""}`;
+      return fmt.formatUpdate(store.update(id, fields));
     }),
 );
 
@@ -255,9 +228,7 @@ server.registerTool(
   },
   ({ n }) =>
     run(() => {
-      const opts = store.nextOptions(n);
-      if (!opts.length) return "Nothing open and unblocked.";
-      return opts.map((o) => `${line(o.node)}  (score ${o.score}: ${o.why})`).join("\n");
+      return fmt.formatNext(store.nextOptions(n));
     }),
 );
 
@@ -277,11 +248,7 @@ const searchInput = {
 };
 
 function searchText(query: string, opts: { all?: boolean; kind?: Node["kind"]; limit: number }): string {
-  const hits = store.search(query, opts);
-  if (!hits.length) return "No matches.";
-  return hits
-    .map((h) => `${line(h.node)}${opts.all ? ` (${h.node.thread_id} "${h.thread_title}")` : ""}\n    ${h.snippet.replace(/\s+/g, " ")}`)
-    .join("\n");
+  return fmt.formatSearch(store.search(query, opts), opts.all);
 }
 
 server.registerTool(
