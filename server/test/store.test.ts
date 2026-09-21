@@ -203,3 +203,26 @@ test("nextOptions favors unexplored and low-confidence questions", () => {
   assert.match(opts[0].why, /unexplored/);
   assert.match(opts[1].why, /low confidence 0\.2/);
 });
+
+test("search ranks title hits, matches prefixes/phrases, and scopes to thread", () => {
+  const { store } = setup();
+  const [a, b] = store.add([
+    { title: "Configure WAL mode", body: "journal settings" },
+    { title: "Other", body: "we might use wal later" },
+  ]);
+  const hits = store.search("wal");
+  assert.deepEqual(hits.map((h) => h.node.id), [a.id, b.id]);
+  assert.match(hits[0].snippet, /\[WAL\]/);
+  assert.deepEqual(store.search("journ").map((h) => h.node.id), [a.id]);
+  assert.deepEqual(store.search('"use wal"').map((h) => h.node.id), [b.id]);
+  assert.deepEqual(store.search("wal AND OR (").map((h) => h.node.id), []); // operators treated as words
+  store.done(a.id, "enabled via pragma");
+  assert.deepEqual(store.search("pragma").map((h) => h.node.id), [a.id]);
+  assert.throws(() => store.search(" *( "), /at least one word/);
+
+  store.createThread("Other thread", "g", false);
+  store.add([{ title: "wal elsewhere", kind: "question" }]);
+  assert.equal(store.search("wal").length, 1);
+  assert.equal(store.search("wal", { all: true }).length, 3);
+  assert.equal(store.search("wal", { all: true, kind: "question" }).length, 1);
+});

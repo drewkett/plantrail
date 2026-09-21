@@ -50,6 +50,13 @@ export interface Option {
   why: string;
 }
 
+export interface SearchHit {
+  node: Node;
+  /** Matching excerpt with hits wrapped in [ ]. */
+  snippet: string;
+  thread_title: string;
+}
+
 export class AutoplanError extends Error {}
 
 const RESOLVED: NodeStatus[] = ["done", "abandoned"];
@@ -488,6 +495,32 @@ export class Store {
     return opts.slice(0, n);
   }
 
+  // ---------- search ----------
+
+  /**
+   * Full-text search over node title/summary/body (FTS5, bm25 with title
+   * weighted highest). Words are matched as prefixes and all must appear;
+   * quote a phrase to match it exactly. Scoped to the current thread unless
+   * `all` is set.
+   */
+  search(query: string, opts: { all?: boolean; kind?: NodeKind; limit?: number } = {}): SearchHit[] {
+    const match = ftsQuery(query);
+    const tid = opts.all ? null : this.current().id;
+    return this.db
+      .prepare(
+        `SELECT n.*, t.title AS thread_title,
+                snippet(nodes_fts, -1, '[', ']', '…', 12) AS snippet
+         FROM nodes_fts JOIN nodes n ON n.rowid = nodes_fts.rowid JOIN threads t ON t.id = n.thread_id
+         WHERE nodes_fts MATCH ? AND (? IS NULL OR n.thread_id = ?) AND (? IS NULL OR n.kind = ?)
+         ORDER BY bm25(nodes_fts, 10, 5, 1) LIMIT ?`,
+      )
+      .all(match, tid, tid, opts.kind ?? null, opts.kind ?? null, opts.limit ?? 10)
+      .map((r) => {
+        const { thread_title, snippet, ...node } = r as unknown as Node & { thread_title: string; snippet: string };
+        return { node, snippet, thread_title };
+      });
+  }
+
   // ---------- checkpoints & status ----------
 
   checkpoint(note: string): { id: number } {
@@ -611,6 +644,21 @@ export class Store {
     }
     return "";
   }
+}
+
+/** Turn free text into a safe FTS5 query: quoted phrases kept, other words become prefix terms. */
+function ftsQuery(q: string): string {
+  const terms: string[] = [];
+  for (const m of q.matchAll(/"([^"]*)"|(\S+)/g)) {
+    if (m[1] !== undefined) {
+      const words = m[1].match(/[\p{L}\p{N}_]+/gu);
+      if (words) terms.push(`"${words.join(" ")}"`);
+    } else {
+      for (const w of m[2].match(/[\p{L}\p{N}_]+/gu) ?? []) terms.push(`"${w}"*`);
+    }
+  }
+  if (!terms.length) throw new AutoplanError("search needs at least one word");
+  return terms.join(" ");
 }
 
 function clip(s: string, n: number): string {

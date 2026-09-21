@@ -209,6 +209,39 @@ server.registerTool(
   ({ id, depth }) => run(() => store.getText(id, depth)),
 );
 
+const searchInput = {
+  query: z.string().describe('Words (matched as prefixes, all required) and/or "quoted phrases"'),
+  kind: kind.optional(),
+  limit: z.number().int().min(1).max(50).default(10),
+};
+
+function searchText(query: string, opts: { all?: boolean; kind?: Node["kind"]; limit: number }): string {
+  const hits = store.search(query, opts);
+  if (!hits.length) return "No matches.";
+  return hits
+    .map((h) => `${line(h.node)}${opts.all ? ` (${h.node.thread_id} "${h.thread_title}")` : ""}\n    ${h.snippet.replace(/\s+/g, " ")}`)
+    .join("\n");
+}
+
+server.registerTool(
+  "search",
+  {
+    description:
+      "Full-text search over node titles, summaries, and bodies in the bound thread. Use before re-deriving something that may already be recorded (findings, decisions, done summaries).",
+    inputSchema: searchInput,
+  },
+  ({ query, kind, limit }) => run(() => searchText(query, { kind, limit })),
+);
+
+server.registerTool(
+  "search_all",
+  {
+    description: "Like search, but across every thread (including parked/done), to reuse findings and decisions from other work.",
+    inputSchema: searchInput,
+  },
+  ({ query, kind, limit }) => run(() => searchText(query, { all: true, kind, limit })),
+);
+
 server.registerTool(
   "checkpoint",
   {

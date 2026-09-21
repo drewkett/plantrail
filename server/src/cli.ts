@@ -22,6 +22,8 @@ const USAGE = `usage: autoplan <command> [args] [--cwd DIR] [--thread ID]
   update ID [--title T] [--body B] [--status open|blocked|abandoned] [--priority N] [--summary S] [--kind K]
   next [-n N]                              ranked options to work on next
   get ID [--depth D]                       full node detail (+ subtree)
+  search QUERY [--all] [--kind K] [-n N]   full-text search this thread (--all: every thread);
+                                           words match as prefixes, "quoted phrases" exactly
   checkpoint NOTE                          save handoff note
   resume [--session ID] [--hook]           SessionStart: bind + print status
                                            (--hook: read {cwd, session_id} JSON from stdin)`;
@@ -254,6 +256,12 @@ function main(argv = process.argv.slice(2)): number {
     case "get":
       out(store.getText(need(arg, "ID"), intOf(v.depth, "--depth") ?? 0));
       return 0;
+    case "search": {
+      const hits = store.search(need(arg, "QUERY"), { all: v.all, kind: kindOf(v.kind), limit: intOf(v.n, "-n") ?? 10 });
+      if (!hits.length) out("No matches.");
+      for (const h of hits) out(`${line(h.node)}${v.all ? ` (${h.node.thread_id} "${h.thread_title}")` : ""}\n    ${h.snippet.replace(/\s+/g, " ")}`);
+      return 0;
+    }
     case "checkpoint": {
       const { id } = store.checkpoint(need(arg, "NOTE"));
       out(`Checkpoint #${id} saved.`);
