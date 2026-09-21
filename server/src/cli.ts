@@ -16,8 +16,9 @@ const USAGE = `usage: autoplan <command> [args] [--cwd DIR] [--thread ID]
                                             "#i" refers to the i-th item of the same array)
   start ID                                 mark active (refuses if blocked)
   done ID --summary S [--ref R]...         complete; summary required
-  finding ID TEXT [--confidence 0..1] [--source S]...
+  finding ID TEXT [--confidence 0..1] [--source S]... [--answers]
                                            record a finding under question/node ID
+                                           (--answers: also close question ID with it)
   update ID [--title T] [--body B] [--status open|blocked|abandoned] [--priority N] [--summary S] [--kind K]
   next [-n N]                              ranked options to work on next
   get ID [--depth D]                       full node detail (+ subtree)
@@ -99,6 +100,7 @@ function main(argv = process.argv.slice(2)): number {
       session: { type: "string" },
       thread: { type: "string" },
       hook: { type: "boolean" },
+      answers: { type: "boolean" },
       all: { type: "boolean" },
       goal: { type: "string" },
       "no-link": { type: "boolean" },
@@ -212,8 +214,20 @@ function main(argv = process.argv.slice(2)): number {
         conf = Number(v.confidence);
         if (Number.isNaN(conf)) throw new AutoplanError("--confidence must be a number between 0 and 1");
       }
-      const n = store.recordFinding(need(id, "ID"), need(rest.join(" ") || undefined, "TEXT"), conf, v.source);
+      const { node: n, closed } = store.recordFinding(
+        need(id, "ID"),
+        need(rest.join(" ") || undefined, "TEXT"),
+        conf,
+        v.source,
+        v.answers,
+      );
       out(`Recorded ${line(n)}${n.confidence != null ? ` (conf ${n.confidence})` : ""} under ${n.parent_id}`);
+      if (closed) {
+        out(`Answered ${line(closed.node)}`);
+        if (closed.unblocked.length) out(`Unblocked: ${closed.unblocked.map(line).join("; ")}`);
+        if (closed.parentReady)
+          out(`All children of ${closed.parentReady.id} "${closed.parentReady.title}" are resolved — consider: autoplan done ${closed.parentReady.id}`);
+      }
       return 0;
     }
     case "update": {

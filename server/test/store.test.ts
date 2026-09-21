@@ -146,7 +146,7 @@ test("current() falls back to latest binding in cwd", () => {
 test("recordFinding attaches a done finding with confidence and sources", () => {
   const { store } = setup();
   const [q] = store.add([{ title: "Is WAL safe on NFS?", kind: "question" }]);
-  const f = store.recordFinding(q.id, "No: WAL needs shared memory.\nSee docs.", 0.9, ["https://sqlite.org/wal.html"]);
+  const { node: f } = store.recordFinding(q.id, "No: WAL needs shared memory.\nSee docs.", 0.9, ["https://sqlite.org/wal.html"]);
   assert.equal(f.kind, "finding");
   assert.equal(f.status, "done");
   assert.equal(f.parent_id, q.id);
@@ -164,7 +164,42 @@ test("recordFinding validates input", () => {
   assert.throws(() => store.recordFinding(q.id, " "), /needs text/);
   assert.throws(() => store.recordFinding(q.id, "x", 1.5), /between 0 and 1/);
   assert.throws(() => store.recordFinding("n99", "x"), /No node n99/);
-  const f = store.recordFinding(q.id, "x");
+  const { node: f } = store.recordFinding(q.id, "x");
   assert.equal(f.confidence, null);
   assert.throws(() => store.recordFinding(f.id, "y"), /is a finding/);
+});
+
+test("recordFinding --answers closes the question and unblocks dependents", () => {
+  const { store, db } = setup();
+  const [q, t] = store.add([{ title: "q", kind: "question", blocks: ["#1"] }, { title: "t" }]);
+  const { node: f, closed } = store.recordFinding(q.id, "yes", 0.8, ["src"], true);
+  assert.equal(closed!.node.status, "done");
+  assert.match(closed!.node.summary!, new RegExp(`Answered by ${f.id}: yes`));
+  assert.deepEqual(closed!.unblocked.map((n) => n.id), [t.id]);
+  assert.ok(db.prepare("SELECT 1 FROM edges WHERE from_id = ? AND to_id = ? AND type = 'answers'").get(f.id, q.id));
+  assert.throws(() => store.recordFinding(q.id, "again", undefined, undefined, true), /already done/);
+  assert.throws(() => store.recordFinding(t.id, "x", undefined, undefined, true), /only questions/);
+});
+
+test("recordFinding --answers refuses a question with open children, leaving no finding", () => {
+  const { store } = setup();
+  const [q] = store.add([{ title: "q", kind: "question" }, { title: "sub", parent: "#0" }]);
+  assert.throws(() => store.recordFinding(q.id, "x", undefined, undefined, true), /unresolved children/);
+  assert.equal(store.children(q.id).filter((c) => c.kind === "finding").length, 0);
+});
+
+test("nextOptions favors unexplored and low-confidence questions", () => {
+  const { store } = setup();
+  const [task, unexplored, weak, solid] = store.add([
+    { title: "task" },
+    { title: "unexplored", kind: "question" },
+    { title: "weak", kind: "question" },
+    { title: "solid", kind: "question" },
+  ]);
+  store.recordFinding(weak.id, "maybe", 0.2);
+  store.recordFinding(solid.id, "surely", 0.95);
+  const opts = store.nextOptions(4);
+  assert.deepEqual(opts.map((o) => o.node.id), [unexplored.id, weak.id, task.id, solid.id]);
+  assert.match(opts[0].why, /unexplored/);
+  assert.match(opts[1].why, /low confidence 0\.2/);
 });

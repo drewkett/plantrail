@@ -310,15 +310,16 @@ export class Store {
     const open = this.children(id).filter((c) => !RESOLVED.includes(c.status));
     if (open.length)
       throw new AutoplanError(`${id} has unresolved children: ${open.map((c) => c.id).join(", ")}`);
-    return this.tx(() => {
-      const now = this.ts();
-      this.db
-        .prepare("UPDATE nodes SET status = 'done', summary = ?, refs = ?, updated_at = ? WHERE id = ?")
-        .run(summary.trim(), refs?.length ? JSON.stringify(refs) : null, now, id);
-      const unblocked = this.releaseDependents(id, now);
-      this.touch(node.thread_id);
-      return { node: this.getNode(id), unblocked, parentReady: this.parentReady(node.parent_id) };
-    });
+    return this.tx(() => this.complete(node, summary.trim(), refs, this.ts()));
+  }
+
+  private complete(node: Node, summary: string, refs: string[] | undefined, now: string) {
+    this.db
+      .prepare("UPDATE nodes SET status = 'done', summary = ?, refs = ?, updated_at = ? WHERE id = ?")
+      .run(summary, refs?.length ? JSON.stringify(refs) : null, now, node.id);
+    const unblocked = this.releaseDependents(node.id, now);
+    this.touch(node.thread_id);
+    return { node: this.getNode(node.id), unblocked, parentReady: this.parentReady(node.parent_id) };
   }
 
   /** Dependents of `id` that no longer have open blockers; `blocked` ones are reopened. */
@@ -349,13 +350,28 @@ export class Store {
   /**
    * Record a finding under a question (or any node it informs). Findings are
    * facts, so they are created done: the text is the summary, sources the refs.
+   * With `answers`, the finding also closes its parent question: an `answers`
+   * edge is added and the question is completed with the finding as summary.
    */
-  recordFinding(parentId: string, text: string, confidence?: number, sources?: string[]): Node {
+  recordFinding(
+    parentId: string,
+    text: string,
+    confidence?: number,
+    sources?: string[],
+    answers = false,
+  ): { node: Node; closed: { node: Node; unblocked: Node[]; parentReady: Node | null } | null } {
     if (!text?.trim()) throw new AutoplanError("A finding needs text");
     if (confidence !== undefined && !(confidence >= 0 && confidence <= 1))
       throw new AutoplanError("confidence must be between 0 and 1");
     const parent = this.getNode(parentId);
     if (parent.kind === "finding") throw new AutoplanError(`${parentId} is a finding; attach to the question it informs`);
+    if (answers) {
+      if (parent.kind !== "question") throw new AutoplanError(`${parentId} is a ${parent.kind}; only questions can be answered`);
+      if (RESOLVED.includes(parent.status)) throw new AutoplanError(`${parentId} is already ${parent.status}`);
+      const open = this.children(parentId).filter((c) => !RESOLVED.includes(c.status));
+      if (open.length)
+        throw new AutoplanError(`${parentId} has unresolved children: ${open.map((c) => c.id).join(", ")}`);
+    }
     const t = text.trim();
     return this.tx(() => {
       const id = this.nextId("n");
@@ -376,9 +392,22 @@ export class Store {
           now,
           now,
         );
+      let closed = null;
+      if (answers) {
+        this.db.prepare("INSERT INTO edges (from_id, to_id, type) VALUES (?, ?, 'answers')").run(id, parent.id);
+        closed = this.complete(parent, `Answered by ${id}: ${t}`, sources, now);
+      }
       this.touch(parent.thread_id);
-      return this.getNode(id);
+      return { node: this.getNode(id), closed };
     });
+  }
+
+  /** Finding count and best confidence under a node (null if none recorded a confidence). */
+  private evidence(id: string): { count: number; best: number | null } {
+    const r = this.db
+      .prepare("SELECT COUNT(*) AS count, MAX(confidence) AS best FROM nodes WHERE parent_id = ? AND kind = 'finding'")
+      .get(id) as { count: number; best: number | null };
+    return { count: Number(r.count), best: r.best };
   }
 
   update(
@@ -414,7 +443,9 @@ export class Store {
   /**
    * Rank open, unblocked tasks/questions. Leaves beat containers, explicit
    * priority dominates, deeper (more concrete) nodes get a small boost, and
-   * nodes untouched for a while float up so nothing rots.
+   * nodes untouched for a while float up so nothing rots. Questions with no
+   * findings (unexplored) or only low-confidence ones get a boost so research
+   * goes where the uncertainty is.
    */
   nextOptions(n = 3, threadId?: string): Option[] {
     const tid = threadId ?? this.current().id;
@@ -431,10 +462,21 @@ export class Store {
       const depth = this.depth(node);
       const staleDays = Math.min(7, (now - Date.parse(node.updated_at)) / 86_400_000);
       const leaf = openKids === 0 ? 5 : 0;
-      const score = node.priority * 10 + leaf + depth * 1.5 + staleDays * 0.5;
+      let research = 0;
+      let researchWhy: string | null = null;
+      if (node.kind === "question") {
+        const ev = this.evidence(node.id);
+        if (!ev.count) [research, researchWhy] = [3, "unexplored"];
+        else if (ev.best == null || ev.best < 0.7) {
+          research = 3 * (1 - (ev.best ?? 0.5));
+          researchWhy = `low confidence ${ev.best ?? "unrated"}`;
+        }
+      }
+      const score = node.priority * 10 + leaf + depth * 1.5 + staleDays * 0.5 + research;
       const why = [
         node.priority ? `p${node.priority}` : null,
         openKids ? `${openKids} open children` : "leaf",
+        researchWhy,
         depth ? `depth ${depth}` : null,
         staleDays >= 1 ? `idle ${Math.floor(staleDays)}d` : null,
       ]

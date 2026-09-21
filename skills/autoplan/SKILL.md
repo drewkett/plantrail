@@ -36,7 +36,7 @@ Run it via Bash as `~/.autoplan/bin/autoplan <command>` (the SessionStart hook i
 - Discovered new work? `add` it; don't silently expand the current node.
 - Can't proceed? `autoplan update nN --status blocked --body "why"`, or add a blocker node with `--blocks nN`.
 - Dead end? `autoplan update nN --status abandoned --summary "why"`. Abandoning also frees anything it blocked.
-- Learned something that answers or informs a question? `autoplan finding nN "what you found" --confidence 0.8 --source <url|path>` (repeat `--source`). It's recorded as a done finding under nN; confidence is 0–1, so be honest about how sure you are.
+- Learned something that answers or informs a question? `autoplan finding nN "what you found" --confidence 0.8 --source <url|path>` (repeat `--source`). It's recorded as a done finding under nN; confidence is 0–1, so be honest about how sure you are. If it settles the question, add `--answers` to close nN with it. `next` ranks unexplored and low-confidence questions higher.
 - Record decisions as nodes (`--kind decision`) with the reasoning in `--body`, so later sessions don't reopen them.
 - `autoplan get nN [--depth 1]` for detail on demand. Never dump whole subtrees without a reason.
 - `autoplan checkpoint "note"` after meaningful progress, before stopping, and before `/clear` or compaction. Write the note for a fresh session with no memory: current state, the next concrete step, and anything non-obvious.
