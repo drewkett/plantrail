@@ -1,6 +1,6 @@
 {
-  "name": "plantrail-dev",
-  "description": "Local dev marketplace for plantrail",
+  "name": "plantrail",
+  "description": "Marketplace for the plantrail plugin",
   "owner": { "name": "Andrew Burkett" },
   "plugins": [
     { "name": "plantrail", "source": "./", "description": "Queryable state for long-running tasks and research." }

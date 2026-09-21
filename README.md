@@ -10,7 +10,7 @@ Requires Node.js 22.13 or later (uses `node:sqlite`).
 
 ```sh
 /plugin marketplace add drewkett/plantrail
-/plugin install plantrail@plantrail-dev
+/plugin install plantrail@plantrail
 ```
 
 On first session start, the plugin installs a shim at `~/.plantrail/bin/plantrail`. Data lives in `~/.plantrail` (override with `PLANTRAIL_HOME`).
