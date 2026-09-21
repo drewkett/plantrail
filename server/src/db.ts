@@ -86,6 +86,7 @@ const MIGRATIONS: string[] = [
   END;
   `,
   `ALTER TABLE nodes ADD COLUMN confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1));`,
+  `ALTER TABLE threads ADD COLUMN nudged_at TEXT;`,
 ];
 
 export function openDb(path?: string): DB {

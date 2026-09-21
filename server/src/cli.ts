@@ -26,7 +26,9 @@ const USAGE = `usage: autoplan <command> [args] [--cwd DIR] [--thread ID]
                                            words match as prefixes, "quoted phrases" exactly
   checkpoint NOTE                          save handoff note
   resume [--session ID] [--hook]           SessionStart: bind + print status
-                                           (--hook: read {cwd, session_id} JSON from stdin)`;
+                                           (--hook: read {cwd, session_id} JSON from stdin)
+  stop --hook                              Stop hook: remind once to checkpoint after changes
+  precompact --hook                        PreCompact hook: auto-checkpoint if anything changed`;
 
 const KINDS = ["task", "question", "finding", "decision"];
 
@@ -34,7 +36,7 @@ function readStdin(): string {
   return readFileSync(0, "utf8");
 }
 
-function readHookInput(): { cwd?: string; session_id?: string } {
+function readHookInput(): { cwd?: string; session_id?: string; stop_hook_active?: boolean; trigger?: string } {
   try {
     return JSON.parse(readStdin());
   } catch {
@@ -126,8 +128,9 @@ function main(argv = process.argv.slice(2)): number {
   const arg = args.join(" ") || undefined;
   let cwd = v.cwd;
   let session = v.session;
+  let input: ReturnType<typeof readHookInput> = {};
   if (v.hook) {
-    const input = readHookInput();
+    input = readHookInput();
     cwd ??= input.cwd;
     session ??= input.session_id;
   }
@@ -152,6 +155,18 @@ function main(argv = process.argv.slice(2)): number {
           hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text },
         }));
       } else out(text);
+      return 0;
+    }
+    case "stop": {
+      // Stop hook: block once with a reminder so Claude records progress.
+      if (input.stop_hook_active) return 0;
+      const reason = store.stopNudge(session);
+      if (reason) out(JSON.stringify({ decision: "block", reason }));
+      return 0;
+    }
+    case "precompact": {
+      const cp = store.autoCheckpoint(session, input.trigger === "manual" ? "/compact" : "auto-compaction");
+      if (cp) out(JSON.stringify({ systemMessage: `autoplan: saved checkpoint #${cp.id} on ${cp.thread} before compaction` }));
       return 0;
     }
     case "status":

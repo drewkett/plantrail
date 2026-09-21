@@ -6,6 +6,20 @@
           { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/dist/cli.js\" resume --hook", "timeout": 10 }
         ]
       }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/dist/cli.js\" precompact --hook", "timeout": 10 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/dist/cli.js\" stop --hook", "timeout": 10 }
+        ]
+      }
     ]
   }
 }

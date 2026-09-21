@@ -12,6 +12,8 @@ export interface Thread {
   status: ThreadStatus;
   created_at: string;
   touched_at: string;
+  /** When the Stop hook last reminded about uncheckpointed changes. */
+  nudged_at?: string | null;
 }
 
 export interface Node {
@@ -647,6 +649,74 @@ export class Store {
   }
 
   /** SessionStart helper: bind session to the thread for cwd and describe it. */
+  // ---------- lifecycle hooks ----------
+
+  /** Thread for a hook: the session's own binding if known, else the cwd's. Null when none. */
+  private hookThread(sessionId?: string): Thread | null {
+    if (sessionId) {
+      const r = this.db
+        .prepare(
+          `SELECT s.thread_id FROM sessions s JOIN threads t ON t.id = s.thread_id
+           WHERE s.session_id = ? AND t.status = 'active'`,
+        )
+        .get(sessionId) as { thread_id: string } | undefined;
+      if (r) return this.getThread((this.bound = r.thread_id));
+    }
+    try {
+      return this.current();
+    } catch (e) {
+      if (e instanceof AutoplanError) return null;
+      throw e;
+    }
+  }
+
+  /** Nodes updated after the thread's last checkpoint (and after `since`, if later). */
+  private changedSince(threadId: string, since?: string | null): Node[] {
+    const cp = this.db
+      .prepare("SELECT created_at FROM checkpoints WHERE thread_id = ? ORDER BY id DESC LIMIT 1")
+      .get(threadId) as { created_at: string } | undefined;
+    const mark = [cp?.created_at, since].filter(Boolean).sort().pop() ?? "";
+    return this.db
+      .prepare("SELECT * FROM nodes WHERE thread_id = ? AND updated_at > ? ORDER BY updated_at")
+      .all(threadId, mark) as unknown as Node[];
+  }
+
+  /**
+   * Stop hook: if nodes changed since the last checkpoint, return a one-time
+   * reminder to record progress (null otherwise). Nudges again only after
+   * further changes.
+   */
+  stopNudge(sessionId?: string): string | null {
+    const t = this.hookThread(sessionId);
+    if (!t) return null;
+    const changed = this.changedSince(t.id, t.nudged_at);
+    if (!changed.length) return null;
+    this.db.prepare("UPDATE threads SET nudged_at = ? WHERE id = ?").run(this.ts(), t.id);
+    const list = changed.slice(0, 5).map((n) => `${n.id} (${n.status})`).join(", ");
+    return (
+      `[autoplan] ${t.id}: ${changed.length} node(s) changed since the last checkpoint: ${list}${changed.length > 5 ? ", …" : ""}. ` +
+      "Before stopping: mark finished nodes done with a summary, add any new work you found, and run " +
+      "`autoplan checkpoint \"<state, next step, gotchas>\"`. If that's already covered, just stop."
+    );
+  }
+
+  /** PreCompact hook: save an automatic checkpoint if anything changed since the last one. */
+  autoCheckpoint(sessionId?: string, trigger = "compaction"): { id: number; thread: string } | null {
+    const t = this.hookThread(sessionId);
+    if (!t) return null;
+    const changed = this.changedSince(t.id);
+    if (!changed.length) return null;
+    const active = changed.filter((n) => n.status === "active").map(fmt);
+    const note = [
+      `auto (before ${trigger}); no manual checkpoint since these changes.`,
+      active.length ? `Active: ${active.join("; ")}.` : null,
+      `Changed: ${changed.map((n) => `${n.id} ${n.status}`).join(", ")}.`,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return { ...this.checkpoint(note), thread: t.id };
+  }
+
   resume(sessionId?: string): string {
     const keys = locationKeys(this.cwd);
     const linked = this.threadsForLocation(keys);

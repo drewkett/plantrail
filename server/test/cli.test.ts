@@ -49,3 +49,16 @@ test("cli: resume installs the shim", () => {
   assert.equal(r.code, 0);
   assert.ok(existsSync(join(r.home, "bin", "autoplan")));
 });
+
+test("cli: stop/precompact hooks emit JSON only when there is something to record", () => {
+  const ap = setup();
+  assert.equal(ap(["stop", "--hook"], "{}").out, "");
+  ap(["create", "Demo", "--goal", "g"]);
+  ap(["add", "x"]);
+  const stop = JSON.parse(ap(["stop", "--hook"], "{}").out);
+  assert.equal(stop.decision, "block");
+  assert.match(stop.reason, /checkpoint/);
+  assert.equal(ap(["stop", "--hook"], JSON.stringify({ stop_hook_active: true })).out, "");
+  assert.match(JSON.parse(ap(["precompact", "--hook"], "{}").out).systemMessage, /saved checkpoint #1 on t1/);
+  assert.equal(ap(["precompact", "--hook"], "{}").out, "");
+});

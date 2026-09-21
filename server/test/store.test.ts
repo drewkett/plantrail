@@ -239,3 +239,25 @@ test("status shows capped related findings/decisions from other threads", () => 
   store.createThread("Nothing in common here", "zzz", false);
   assert.doesNotMatch(store.statusText(), /Related/);
 });
+
+test("stop hook nudges once per batch of changes; precompact auto-checkpoints", () => {
+  const { store, clock } = setup();
+  assert.equal(store.stopNudge(), null);
+  const [a] = store.add([{ title: "a" }]);
+  clock.advance(1000);
+  store.start(a.id);
+  assert.match(store.stopNudge() ?? "", /1 node\(s\) changed since the last checkpoint: n1 \(active\)/);
+  clock.advance(1000);
+  assert.equal(store.stopNudge(), null); // already nudged, nothing new
+  clock.advance(1000);
+  store.checkpoint("manual");
+  assert.equal(store.autoCheckpoint(), null); // nothing since manual checkpoint
+  clock.advance(1000);
+  store.done(a.id, "did a");
+  assert.match(store.stopNudge() ?? "", /n1 \(done\)/);
+  const cp = store.autoCheckpoint(undefined, "/compact");
+  assert.ok(cp);
+  assert.match(store.statusText(), /Last checkpoint .*auto \(before \/compact\).*Changed: n1 done/);
+  clock.advance(1000);
+  assert.equal(store.stopNudge(), null);
+});
