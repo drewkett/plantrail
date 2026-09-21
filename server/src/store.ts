@@ -256,10 +256,14 @@ export class Store {
     return this.getThread(threadId);
   }
 
-  renameThread(threadId: string, title: string): Thread {
-    if (!title.trim()) throw new PlantrailError("Title must not be empty");
-    this.getThread(threadId);
-    this.db.prepare("UPDATE threads SET title = ?, touched_at = ? WHERE id = ?").run(title.trim(), this.ts(), threadId);
+  /** Change a thread's title and/or goal; omitted fields are left as-is. */
+  renameThread(threadId: string, title?: string, goal?: string): Thread {
+    if (title === undefined && goal === undefined) throw new PlantrailError("Nothing to change: give a title and/or goal");
+    if (title !== undefined && !title.trim()) throw new PlantrailError("Title must not be empty");
+    const t = this.getThread(threadId);
+    this.db
+      .prepare("UPDATE threads SET title = ?, goal = ?, touched_at = ? WHERE id = ?")
+      .run(title?.trim() ?? t.title, goal?.trim() ?? t.goal, this.ts(), threadId);
     return this.getThread(threadId);
   }
 

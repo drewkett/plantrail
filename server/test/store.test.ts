@@ -289,6 +289,16 @@ test("renameThread updates the title and rejects empty titles", () => {
   assert.throws(() => store.renameThread("t9", "x"));
 });
 
+test("renameThread updates the goal alone or with the title", () => {
+  const { store } = setup();
+  const before = store.getThread("t1").title;
+  assert.equal(store.renameThread("t1", undefined, " New goal ").goal, "New goal");
+  assert.equal(store.getThread("t1").title, before);
+  const t = store.renameThread("t1", "T2", "G2");
+  assert.deepEqual([t.title, t.goal], ["T2", "G2"]);
+  assert.throws(() => store.renameThread("t1"), /Nothing to change/);
+});
+
 test("link: relinks after a move, prunes dead paths, resume self-heals via other keys", () => {
   const { store, db, dir } = setup();
   const moved = mkdtempSync(join(tmpdir(), "plantrail-moved-"));
