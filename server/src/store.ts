@@ -197,8 +197,7 @@ export class Store {
   relink(threadId?: string, prune = false): { added: LinkKey[]; removed: LinkKey[]; links: LinkKey[] } {
     const t = threadId ? this.getThread(threadId) : this.current();
     return this.tx(() => {
-      const links = () =>
-        this.db.prepare("SELECT kind, value FROM links WHERE thread_id = ? ORDER BY kind, value").all(t.id).map((l) => ({ ...l })) as unknown as LinkKey[];
+      const links = () => this.links(t.id);
       const before = new Set(links().map((l) => `${l.kind}\0${l.value}`));
       const added = locationKeys(this.cwd).filter((k) => !before.has(`${k.kind}\0${k.value}`));
       for (const k of added) this.addLink(t.id, k);
@@ -219,8 +218,7 @@ export class Store {
     const removed = { kind: spec.slice(0, i), value: spec.slice(i + 1) } as LinkKey;
     const r = this.db.prepare("DELETE FROM links WHERE thread_id = ? AND kind = ? AND value = ?").run(t.id, removed.kind, removed.value);
     if (!r.changes) throw new PlantrailError(`${t.id} has no link ${spec}`);
-    const links = this.db.prepare("SELECT kind, value FROM links WHERE thread_id = ? ORDER BY kind, value").all(t.id).map((l) => ({ ...l })) as unknown as LinkKey[];
-    return { removed, links };
+    return { removed, links: this.links(t.id) };
   }
 
   listThreads(filter: "active" | "parked" | "done" | "all" = "active"): Thread[] {
@@ -232,16 +230,21 @@ export class Store {
     return (filter === "all" ? stmt.all() : stmt.all(filter)) as unknown as Thread[];
   }
 
-  /** Active threads linked to any of the given location keys. */
-  threadsForLocation(keys: LinkKey[]): Thread[] {
+  /** A thread's links, sorted. */
+  private links(threadId: string): LinkKey[] {
+    return this.db.prepare("SELECT kind, value FROM links WHERE thread_id = ? ORDER BY kind, value").all(threadId).map((l) => ({ ...l })) as unknown as LinkKey[];
+  }
+
+  /** Threads with the given status linked to any of the given location keys, most recently touched first. */
+  threadsForLocation(keys: LinkKey[], status: "active" | "parked" = "active", limit = -1): Thread[] {
     if (!keys.length) return [];
     const cond = keys.map(() => "(l.kind = ? AND l.value = ?)").join(" OR ");
     return this.db
       .prepare(
         `SELECT DISTINCT t.* FROM threads t JOIN links l ON l.thread_id = t.id
-         WHERE t.status = 'active' AND (${cond}) ORDER BY t.touched_at DESC`,
+         WHERE t.status = ? AND (${cond}) ORDER BY t.touched_at DESC LIMIT ?`,
       )
-      .all(...keys.flatMap((k) => [k.kind, k.value])) as unknown as Thread[];
+      .all(status, ...keys.flatMap((k) => [k.kind, k.value]), limit) as unknown as Thread[];
   }
 
   private bindInner(threadId: string, sessionId?: string): void {
@@ -901,7 +904,7 @@ export class Store {
            WHERE n.thread_id = ? ORDER BY e.rowid`,
         )
         .all(t.id) as unknown as ThreadExport["edges"],
-      links: this.db.prepare("SELECT kind, value FROM links WHERE thread_id = ?").all(t.id) as unknown as ThreadExport["links"],
+      links: this.links(t.id),
       checkpoints: this.db
         .prepare("SELECT id, note, frontier_json, created_at FROM checkpoints WHERE thread_id = ? ORDER BY id")
         .all(t.id)
@@ -1046,14 +1049,7 @@ export class Store {
 
   /** Hint about parked threads linked here, shown when no active thread is. */
   private parkedHere(keys: LinkKey[]): string {
-    if (!keys.length) return "";
-    const cond = keys.map(() => "(l.kind = ? AND l.value = ?)").join(" OR ");
-    const parked = this.db
-      .prepare(
-        `SELECT DISTINCT t.* FROM threads t JOIN links l ON l.thread_id = t.id
-         WHERE t.status = 'parked' AND (${cond}) ORDER BY t.touched_at DESC LIMIT 3`,
-      )
-      .all(...keys.flatMap((k) => [k.kind, k.value])) as unknown as Thread[];
+    const parked = this.threadsForLocation(keys, "parked", 3);
     if (!parked.length) return "";
     return [
       "[plantrail] Parked threads linked here (idle; not resumed). If the user's task continues one, run `plantrail bind <thread_id>` to reactivate it:",
