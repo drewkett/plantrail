@@ -271,6 +271,17 @@ server.registerTool(
 );
 
 server.registerTool(
+  "export",
+  {
+    description:
+      "Export a whole thread (default: bound) as markdown (readable tree with summaries and checkpoints) or JSON (nodes, edges, links, checkpoints). For sharing or archiving; use status/get for normal work.",
+    inputSchema: { thread_id: z.string().optional(), format: z.enum(["md", "json"]).optional() },
+  },
+  ({ thread_id, format }) =>
+    run(() => (format === "json" ? JSON.stringify(store.exportData(thread_id), null, 2) : store.exportMarkdown(thread_id))),
+);
+
+server.registerTool(
   "resume",
   {
     description: "Resolve and bind the thread for the current directory and return its status. Normally done automatically at session start.",

@@ -25,6 +25,8 @@ const USAGE = `usage: autoplan <command> [args] [--cwd DIR] [--thread ID]
   get ID [--depth D]                       full node detail (+ subtree)
   search QUERY [--all] [--kind K] [-n N]   full-text search this thread (--all: every thread);
                                            words match as prefixes, "quoted phrases" exactly
+  export [THREAD_ID] [--format md|json] [-o FILE]
+                                           dump a thread (default: bound) as markdown or JSON
   checkpoint NOTE                          save handoff note
   resume [--session ID] [--hook]           SessionStart: bind + print status
                                            (--hook: read {cwd, session_id} JSON from stdin)
@@ -123,6 +125,8 @@ function main(argv = process.argv.slice(2)): number {
       status: { type: "string" },
       n: { type: "string", short: "n" },
       depth: { type: "string" },
+      format: { type: "string" },
+      o: { type: "string", short: "o" },
     },
   });
   const [cmd, ...args] = positionals;
@@ -281,6 +285,16 @@ function main(argv = process.argv.slice(2)): number {
       const hits = store.search(need(arg, "QUERY"), { all: v.all, kind: kindOf(v.kind), limit: intOf(v.n, "-n") ?? 10 });
       if (!hits.length) out("No matches.");
       for (const h of hits) out(`${line(h.node)}${v.all ? ` (${h.node.thread_id} "${h.thread_title}")` : ""}\n    ${h.snippet.replace(/\s+/g, " ")}`);
+      return 0;
+    }
+    case "export": {
+      const fmt = v.format ?? "md";
+      if (fmt !== "md" && fmt !== "json") throw new AutoplanError("--format must be md or json");
+      const text = fmt === "json" ? JSON.stringify(store.exportData(arg), null, 2) + "\n" : store.exportMarkdown(arg);
+      if (v.o) {
+        writeFileSync(v.o, text);
+        out(`Wrote ${v.o}`);
+      } else process.stdout.write(text);
       return 0;
     }
     case "checkpoint": {

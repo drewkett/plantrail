@@ -62,3 +62,23 @@ test("cli: stop/precompact hooks emit JSON only when there is something to recor
   assert.match(JSON.parse(ap(["precompact", "--hook"], "{}").out).systemMessage, /saved checkpoint #1 on t1/);
   assert.equal(ap(["precompact", "--hook"], "{}").out, "");
 });
+
+test("cli: export md and json", () => {
+  const ap = setup();
+  ap(["create", "Demo", "--goal", "ship it"]);
+  ap(["add", "-"], JSON.stringify([{ title: "dep" }, { title: "parent" }, { title: "child", parent: "#1", blocked_by: ["#0"] }]));
+  ap(["done", "n1", "--summary", "dep done", "--ref", "a.ts"]);
+  ap(["checkpoint", "cp note"]);
+  const md = ap(["export"]).out;
+  assert.match(md, /^# Demo \(t1\)/);
+  assert.match(md, /\*\*Goal:\*\* ship it/);
+  assert.match(md, /^- \[ \] \*\*n2\*\* parent\n  - \[ \] \*\*n3\*\* child _\(blocked by n1\)_/m);
+  assert.match(md, /- \[x\] \*\*n1\*\* dep\n  - Summary: dep done\n  - Refs: `a.ts`/);
+  assert.match(md, /## Checkpoints\n\n- .* — cp note/);
+  const j = JSON.parse(ap(["export", "t1", "--format", "json"]).out);
+  assert.deepEqual(j.nodes.map((n: any) => n.id), ["n1", "n2", "n3"]);
+  assert.deepEqual(j.nodes[0].refs, ["a.ts"]);
+  assert.deepEqual(j.edges, [{ from_id: "n1", to_id: "n3", type: "blocks" }]);
+  assert.equal(j.checkpoints[0].note, "cp note");
+  assert.match(ap(["export", "--format", "xml"]).err, /md or json/);
+});

@@ -59,6 +59,17 @@ export interface SearchHit {
   thread_title: string;
 }
 
+export interface ThreadExport {
+  version: 1;
+  exported_at: string;
+  thread: Thread;
+  /** Depth-first tree order; refs decoded. */
+  nodes: (Omit<Node, "refs"> & { refs: string[] | null })[];
+  edges: { from_id: string; to_id: string; type: string }[];
+  links: { kind: string; value: string }[];
+  checkpoints: { id: number; note: string; frontier: { active: string[]; next: string[] }; created_at: string }[];
+}
+
 export class AutoplanError extends Error {}
 
 const RESOLVED: NodeStatus[] = ["done", "abandoned"];
@@ -674,6 +685,77 @@ export class Store {
       if (k) lines.push(`${k} children (use depth>0 to list)`);
     }
     return lines.join("\n");
+  }
+
+  // ---------- export ----------
+
+  /** Full dump of a thread (default: bound): nodes in tree order, edges, links, checkpoints. */
+  exportData(threadId?: string): ThreadExport {
+    const t = threadId ? this.getThread(threadId) : this.current();
+    const all = this.db
+      .prepare("SELECT * FROM nodes WHERE thread_id = ? ORDER BY priority DESC, rowid")
+      .all(t.id) as unknown as Node[];
+    const kids = new Map<string | null, Node[]>();
+    for (const n of all) kids.set(n.parent_id, [...(kids.get(n.parent_id) ?? []), n]);
+    const nodes: Node[] = [];
+    const walk = (pid: string | null) => {
+      for (const n of kids.get(pid) ?? []) {
+        nodes.push(n);
+        walk(n.id);
+      }
+    };
+    walk(null);
+    return {
+      version: 1,
+      exported_at: this.ts(),
+      thread: t,
+      nodes: nodes.map((n) => ({ ...n, refs: n.refs ? (JSON.parse(n.refs) as string[]) : null })),
+      edges: this.db
+        .prepare(
+          `SELECT e.from_id, e.to_id, e.type FROM edges e JOIN nodes n ON n.id = e.from_id
+           WHERE n.thread_id = ? ORDER BY e.rowid`,
+        )
+        .all(t.id) as unknown as ThreadExport["edges"],
+      links: this.db.prepare("SELECT kind, value FROM links WHERE thread_id = ?").all(t.id) as unknown as ThreadExport["links"],
+      checkpoints: this.db
+        .prepare("SELECT id, note, frontier_json, created_at FROM checkpoints WHERE thread_id = ? ORDER BY id")
+        .all(t.id)
+        .map((c: any) => ({ id: c.id, note: c.note, frontier: JSON.parse(c.frontier_json), created_at: c.created_at })),
+    };
+  }
+
+  exportMarkdown(threadId?: string): string {
+    const x = this.exportData(threadId);
+    const blockedBy = new Map<string, string[]>();
+    for (const e of x.edges) if (e.type === "blocks") blockedBy.set(e.to_id, [...(blockedBy.get(e.to_id) ?? []), e.from_id]);
+    const mark: Record<NodeStatus, string> = { open: "[ ]", active: "[~]", blocked: "[!]", done: "[x]", abandoned: "[-]" };
+    const depthOf = new Map<string, number>();
+    const L = [`# ${x.thread.title} (${x.thread.id})`, "", `Status: ${x.thread.status} · created ${x.thread.created_at.slice(0, 10)} · touched ${x.thread.touched_at.slice(0, 10)}`];
+    if (x.thread.goal) L.push("", `**Goal:** ${x.thread.goal}`);
+    if (x.links.length) L.push("", `Links: ${x.links.map((l) => `${l.kind}:${l.value}`).join(", ")}`);
+    L.push("", "## Nodes", "");
+    if (!x.nodes.length) L.push("_none_");
+    for (const n of x.nodes) {
+      const d = n.parent_id ? (depthOf.get(n.parent_id) ?? 0) + 1 : 0;
+      depthOf.set(n.id, d);
+      const pad = "  ".repeat(d);
+      const tags = [
+        n.kind !== "task" ? n.kind : "",
+        n.priority ? `p${n.priority}` : "",
+        n.confidence != null ? `conf ${n.confidence}` : "",
+        blockedBy.has(n.id) ? `blocked by ${blockedBy.get(n.id)!.join(", ")}` : "",
+      ].filter(Boolean);
+      L.push(`${pad}- ${mark[n.status]} **${n.id}** ${n.title}${tags.length ? ` _(${tags.join("; ")})_` : ""}`);
+      const sub = (label: string, text: string) => L.push(`${pad}  - ${label}: ${text.replace(/\n+/g, " ")}`);
+      if (n.body) sub("Body", n.body);
+      if (n.summary) sub("Summary", n.summary);
+      if (n.refs?.length) sub("Refs", n.refs.map((r) => `\`${r}\``).join(", "));
+    }
+    if (x.checkpoints.length) {
+      L.push("", "## Checkpoints", "");
+      for (const c of x.checkpoints) L.push(`- ${c.created_at.slice(0, 16)} — ${c.note.replace(/\n+/g, " ")}`);
+    }
+    return L.join("\n") + "\n";
   }
 
   /** SessionStart helper: bind session to the thread for cwd and describe it. */
