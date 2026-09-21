@@ -1,12 +1,8 @@
 {
   "name": "autoplan",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Queryable state for long-running tasks and research that survives /clear, compaction, and new sessions.",
-  "author": { "name": "Andrew Burkett" },
-  "mcpServers": {
-    "autoplan": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/server/dist/index.js"]
-    }
+  "author": {
+    "name": "Andrew Burkett"
   }
 }

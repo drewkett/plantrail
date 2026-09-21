@@ -221,8 +221,8 @@ export class Store {
     }
     const hint = linked.length
       ? `Linked threads here: ${linked.map((t) => `${t.id} "${t.title}"`).join(", ")}.`
-      : "Use list_threads or thread_create.";
-    throw new AutoplanError(`No thread bound. Call bind(thread_id). ${hint}`);
+      : "Use `autoplan threads` or `autoplan create`.";
+    throw new AutoplanError(`No thread bound. Run \`autoplan bind <thread_id>\`. ${hint}`);
   }
 
   // ---------- nodes ----------
@@ -526,7 +526,7 @@ export class Store {
     }
     if (linked.length > 1) {
       return [
-        "[autoplan] Multiple active threads are linked to this location. Ask the user which one, then call bind(thread_id):",
+        "[autoplan] Multiple active threads are linked to this location. Ask the user which one, then run `autoplan bind <thread_id>`:",
         ...linked.map((t) => `  ${t.id} "${t.title}" (touched ${t.touched_at.slice(0, 10)})`),
       ].join("\n");
     }

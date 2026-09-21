@@ -19,13 +19,13 @@ A Claude Code plugin that maintains state for long-running tasks and open-ended 
 
 ```
 autoplan/
-├── .claude-plugin/plugin.json   plugin manifest (MCP server + hooks + skills)
-├── server/                      TypeScript MCP server (stdio)
+├── .claude-plugin/plugin.json   plugin manifest (hooks + skills; no MCP server registered)
+├── server/                      TypeScript: store + CLI (primary) + MCP server (kept, unregistered)
 │   ├── src/db.ts                SQLite schema + migrations (node:sqlite, WAL)
 │   ├── src/store.ts             all state logic (tested directly)
-│   ├── src/index.ts             MCP tool registration → store
+│   ├── src/index.ts             MCP tool registration → store (unused; see decision n19)
 │   ├── dist/                    esbuild bundles (committed; plugin runs without npm install)
-│   └── src/cli.ts               `autoplan` CLI used by hooks (resume, status, export)
+│   └── src/cli.ts               `autoplan` CLI: the interface Claude uses via Bash + the hook entry point
 ├── hooks/hooks.json             SessionStart, PreCompact, Stop
 ├── skills/
 │   ├── autoplan/SKILL.md        core usage: when to call which tool
@@ -50,6 +50,8 @@ Storage: single DB at `~/.autoplan/state.db` (override with `AUTOPLAN_HOME`). No
 IDs: short human-friendly (`t12`, `n143`) so Claude and the user can reference them easily.
 
 ## Tools
+
+Exposed as `autoplan` CLI subcommands (`create`, `threads`, `bind`, `status`, `add`, `start`, `done`, `update`, `next`, `get`, `checkpoint`, `resume`); `add -` takes a JSON array on stdin. The SessionStart hook installs a shim at `~/.autoplan/bin/autoplan`; add `Bash(~/.autoplan/bin/autoplan:*)` to permissions to skip prompts. The table below is the original MCP-shaped spec; semantics are unchanged.
 
 ### MVP
 | Tool | Behavior |
@@ -93,24 +95,10 @@ IDs: short human-friendly (`t12`, `n143`) so Claude and the user can reference t
 - [x] SessionStart hook
 - [x] `skills/autoplan/SKILL.md`
 - [x] Tests for state transitions + `next_options` ranking (`npm test` in `server/`)
-- [ ] **Dogfood switch:** create thread "autoplan development", import remaining milestones below as nodes, link this repo. From here on, track work in autoplan, not this file.
+- [x] **Dogfood switch:** create thread "autoplan development", import remaining milestones below as nodes, link this repo. From here on, track work in autoplan, not this file.
 
-### M2 — Research mode
-- [ ] `record_finding(question_id, text, confidence, sources)`
-- [ ] Findings answer/close questions; `next_options` favors unexplored/low-confidence branches
-- [ ] FTS `search` / `search_all`
-- [ ] `skills/research/SKILL.md`
-
-### M3 — Robustness
-- [ ] PreCompact + Stop hooks
-- [ ] Auto-park stale threads; staleness flags on long-`active` nodes
-- [ ] Repo relink when repos move
-- [ ] `export` to markdown/JSON (backup + readable view)
-
-### M4 — Visibility
-- [ ] `/ap-status`, `/ap-next` commands
-- [ ] HTML graph view (`export(format=html)`)
-- [ ] Capped related-findings from other threads in `status()`
+### M2–M4
+Tracked in autoplan thread `t1` ("autoplan development") — run `node server/dist/cli.js status --cwd .` or call `status()`.
 
 ## Dogfooding notes
 
