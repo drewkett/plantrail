@@ -64,15 +64,17 @@ function build(pid){const ch=kids.get(pid);if(!ch)return null;const ul=el("ul");
  if(sub){item.append(sub);tw.onclick=ev=>{ev.stopPropagation();sub.classList.toggle("hide");tw.textContent=sub.classList.contains("hide")?"▸":"▾"}}
  row.onclick=()=>item.classList.toggle("open");li.set(n.id,item);ul.append(item)}return ul}
 $("tree").append(build(null)||el("p",{class:"mute"},"No nodes."));
-function go(id){const it=li.get(id);if(!it)return;for(let p=it.parentElement;p&&p.id!=="tree";p=p.parentElement)if(p.tagName==="UL")p.classList.remove("hide");
+function go(id){const it=li.get(id);if(!it)return;it.classList.remove("hide");for(let p=it.parentElement;p&&p.id!=="tree";p=p.parentElement)if(p.tagName==="UL")p.classList.remove("hide");
  for(const e of document.querySelectorAll(".hl"))e.classList.remove("hl");it.classList.add("hl","open");it.scrollIntoView({block:"center",behavior:"smooth"})}
 // filters
-const on=new Set(S);
-for(const s of S){const c=X.nodes.filter(n=>n.status===s).length;if(!c)continue;const b=el("button",{class:"on"},el("span",{class:"dot",style:"display:inline-block;margin-right:5px;background:"+C(s)}),s+" "+c);
+// done nodes start hidden (still shown when they have visible descendants)
+const on=new Set(S.filter(s=>s!=="done"));
+for(const s of S){const c=X.nodes.filter(n=>n.status===s).length;if(!c)continue;const b=el("button",{class:on.has(s)?"on":""},el("span",{class:"dot",style:"display:inline-block;margin-right:5px;background:"+C(s)}),s+" "+c);
  b.onclick=()=>{on.has(s)?on.delete(s):on.add(s);b.classList.toggle("on");filt()};$("st").append(b," ")}
 $("q").oninput=filt;
 function filt(){const q=$("q").value.toLowerCase();const vis=n=>on.has(n.status)&&(!q||(n.id+" "+n.title+" "+(n.body||"")+" "+(n.summary||"")).toLowerCase().includes(q));
  const walk=pid=>{let any=false;for(const n of kids.get(pid)||[]){const k=walk(n.id),v=vis(n)||k;li.get(n.id).classList.toggle("hide",!v);any=any||v}return any};walk(null)}
+filt();
 $("exp").onclick=()=>{for(const u of document.querySelectorAll("#tree ul"))u.classList.remove("hide");for(const t of document.querySelectorAll(".tw"))if(t.textContent)t.textContent="▾"};
 $("col").onclick=()=>{for(const u of document.querySelectorAll("#tree ul ul"))u.classList.add("hide");for(const t of document.querySelectorAll(".tw"))if(t.textContent)t.textContent="▸"};
 // dependency graph: nodes touching a blocks edge, layered by longest path
