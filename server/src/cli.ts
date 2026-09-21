@@ -131,7 +131,19 @@ function main(argv = process.argv.slice(2)): number {
     case "resume": {
       installShim();
       const text = store.resume(session);
-      if (text) out(text);
+      if (!text) return 0;
+      if (v.hook) {
+        // JSON output: full status goes to Claude's context, a one-line notice to the user.
+        const lines = text.split("\n");
+        const nodes = lines.find((l) => l.startsWith("Nodes:"));
+        const notice = [lines[0].replace(/^\[autoplan\] /, "autoplan: resumed "), nodes?.replace(/^Nodes: /, "")]
+          .filter(Boolean)
+          .join(" — ");
+        out(JSON.stringify({
+          systemMessage: notice,
+          hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text },
+        }));
+      } else out(text);
       return 0;
     }
     case "status":
