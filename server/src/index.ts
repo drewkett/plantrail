@@ -84,6 +84,19 @@ server.registerTool(
 );
 
 server.registerTool(
+  "rename_thread",
+  {
+    description: "Rename a thread (default: the bound one).",
+    inputSchema: { title: z.string(), thread_id: z.string().optional() },
+  },
+  ({ title, thread_id }) =>
+    run(() => {
+      const t = store.renameThread(thread_id ?? store.current().id, title);
+      return `Renamed ${t.id} to "${t.title}".`;
+    }),
+);
+
+server.registerTool(
   "link",
   {
     description:

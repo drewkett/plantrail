@@ -282,6 +282,13 @@ test("resume auto-parks idle threads; bind reactivates; status flags long-active
   assert.deepEqual(fresh.listThreads("parked").map((t) => t.id), ["t1"]);
 });
 
+test("renameThread updates the title and rejects empty titles", () => {
+  const { store } = setup();
+  assert.equal(store.renameThread("t1", "  Renamed ").title, "Renamed");
+  assert.throws(() => store.renameThread("t1", " "), /must not be empty/);
+  assert.throws(() => store.renameThread("t9", "x"));
+});
+
 test("link: relinks after a move, prunes dead paths, resume self-heals via other keys", () => {
   const { store, db, dir } = setup();
   const moved = mkdtempSync(join(tmpdir(), "plantrail-moved-"));

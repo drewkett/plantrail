@@ -256,6 +256,13 @@ export class Store {
     return this.getThread(threadId);
   }
 
+  renameThread(threadId: string, title: string): Thread {
+    if (!title.trim()) throw new PlantrailError("Title must not be empty");
+    this.getThread(threadId);
+    this.db.prepare("UPDATE threads SET title = ?, touched_at = ? WHERE id = ?").run(title.trim(), this.ts(), threadId);
+    return this.getThread(threadId);
+  }
+
   /** Park active threads untouched for `days`. Returns the parked threads. */
   autoPark(days = PARK_AFTER_DAYS): Thread[] {
     const cutoff = new Date(this.now().getTime() - days * DAY).toISOString();
