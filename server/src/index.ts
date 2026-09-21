@@ -226,7 +226,7 @@ server.registerTool(
   "update",
   {
     description:
-      "Edit a node's title/body/priority/kind, or change status to open, blocked, or abandoned (abandoning needs a summary saying why). Use start/done for active/done.",
+      "Edit a node's title/body/priority/kind, move it (parent: a node id, or \"none\" for top level), or change status to open, blocked, or abandoned (abandoning needs a summary saying why). Use start/done for active/done.",
     inputSchema: {
       id: z.string(),
       title: z.string().optional(),
@@ -235,11 +235,26 @@ server.registerTool(
       priority: z.number().int().optional(),
       summary: z.string().optional(),
       kind: kind.optional(),
+      parent: z.string().optional(),
     },
   },
-  ({ id, ...fields }) =>
+  ({ id, parent, ...fields }) =>
     run(() => {
-      return fmt.formatUpdate(store.update(id, fields));
+      return fmt.formatUpdate(store.update(id, { ...fields, parent: parent === "none" ? null : parent }));
+    }),
+);
+
+server.registerTool(
+  "delete_node",
+  {
+    description:
+      "Delete a node added by mistake. Only leaves with no edges; abandon (update status) anything with history instead.",
+    inputSchema: { id: z.string() },
+  },
+  ({ id }) =>
+    run(() => {
+      const n = store.deleteNode(id);
+      return `Deleted ${n.id} "${n.title}".`;
     }),
 );
 

@@ -358,3 +358,20 @@ test("finish and reopen threads", () => {
   assert.throws(() => store.reopenThread(t.id), /already active/);
   assert.equal(new Store(db, dir).current().id, t.id);
 });
+
+test("move and delete nodes", () => {
+  const { store } = setup();
+  const [a, b, c, d] = store.add([{ title: "a" }, { title: "b", parent: "#0" }, { title: "c" }, { title: "d", blocks: ["#2"] }]);
+  assert.equal(store.update(c.id, { parent: b.id }).node.parent_id, b.id);
+  assert.throws(() => store.update(a.id, { parent: c.id }), /own subtree/);
+  assert.throws(() => store.update(a.id, { parent: a.id }), /own subtree/);
+  assert.equal(store.update(c.id, { parent: null }).node.parent_id, null);
+  store.createThread("Other", "g");
+  const [x] = store.add([{ title: "x" }]);
+  assert.throws(() => store.update(x.id, { parent: a.id }), /belongs to thread/);
+  assert.throws(() => store.deleteNode(a.id), /has children/);
+  assert.throws(() => store.deleteNode(d.id), /has edges/);
+  assert.equal(store.deleteNode(b.id).id, b.id);
+  assert.throws(() => store.getNode(b.id));
+  assert.equal(store.search("b").length, 0);
+});

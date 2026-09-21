@@ -519,9 +519,19 @@ export class Store {
 
   update(
     id: string,
-    fields: { title?: string; body?: string; status?: NodeStatus; priority?: number; summary?: string; kind?: NodeKind },
+    fields: {
+      title?: string;
+      body?: string;
+      status?: NodeStatus;
+      priority?: number;
+      summary?: string;
+      kind?: NodeKind;
+      /** New parent id, or null to move to the top level. */
+      parent?: string | null;
+    },
   ): { node: Node; unblocked: Node[] } {
     const node = this.getNode(id);
+    if (fields.parent) this.checkMove(node, fields.parent);
     if (fields.status === "done")
       throw new PlantrailError("Use done(id, summary) to complete a node");
     if (fields.status === "abandoned" && !(fields.summary ?? node.summary)?.trim())
@@ -535,6 +545,10 @@ export class Store {
         vals.push(fields[k] as string | number);
       }
     }
+    if (fields.parent !== undefined) {
+      sets.push("parent_id = ?");
+      vals.push(fields.parent);
+    }
     if (!sets.length) throw new PlantrailError("No fields to update");
     return this.tx(() => {
       const now = this.ts();
@@ -542,6 +556,35 @@ export class Store {
       const unblocked = fields.status === "abandoned" ? this.releaseDependents(id, now) : [];
       this.touch(node.thread_id);
       return { node: this.getNode(id), unblocked };
+    });
+  }
+
+  /** A node can move under another node of its thread, but not under itself or its own subtree. */
+  private checkMove(node: Node, parentId: string): void {
+    const parent = this.getNode(parentId);
+    if (parent.thread_id !== node.thread_id) throw new PlantrailError(`${parentId} belongs to thread ${parent.thread_id}`);
+    if (parent.kind === "finding") throw new PlantrailError(`${parentId} is a finding and can't have children`);
+    for (let p: Node | null = parent; p; p = p.parent_id ? this.getNode(p.parent_id) : null)
+      if (p.id === node.id) throw new PlantrailError(`Can't move ${node.id} under its own subtree (${parentId})`);
+  }
+
+  /** Delete a mistaken node. Only leaves with no edges, so nothing else loses context. */
+  deleteNode(id: string): Node {
+    const node = this.getNode(id);
+    const kids = this.children(id);
+    if (kids.length)
+      throw new PlantrailError(`${id} has children (${kids.map((c) => c.id).join(", ")}); move or delete them first, or abandon it`);
+    const edges = this.db
+      .prepare("SELECT from_id, to_id, type FROM edges WHERE from_id = ? OR to_id = ?")
+      .all(id, id) as { from_id: string; to_id: string; type: string }[];
+    if (edges.length)
+      throw new PlantrailError(
+        `${id} has edges (${edges.map((e) => `${e.from_id} ${e.type} ${e.to_id}`).join(", ")}); abandon it instead`,
+      );
+    return this.tx(() => {
+      this.db.prepare("DELETE FROM nodes WHERE id = ?").run(id);
+      this.touch(node.thread_id);
+      return node;
     });
   }
 

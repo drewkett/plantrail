@@ -30,6 +30,8 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
                                            record a finding under question/node ID
                                            (--answers: also close question ID with it)
   update ID [--title T] [--body B] [--status open|blocked|abandoned] [--priority N] [--summary S] [--kind K]
+            [--parent ID|none]             (--parent moves the node; none = top level)
+  delete ID                                delete a mistaken leaf node with no edges
   next [-n N]                              ranked options to work on next
   get ID [--depth D]                       full node detail (+ subtree)
   search QUERY [--all] [--kind K] [-n N]   full-text search this thread (--all: every thread);
@@ -286,8 +288,14 @@ function main(argv = process.argv.slice(2)): number {
         priority: intOf(v.priority, "--priority"),
         summary: v.summary,
         kind: kindOf(v.kind),
+        parent: v.parent === "none" ? null : v.parent,
       });
       out(fmt.formatUpdate(r));
+      return 0;
+    }
+    case "delete": {
+      const n = store.deleteNode(need(arg, "ID"));
+      out(`Deleted ${n.id} "${n.title}".`);
       return 0;
     }
     case "next": {
