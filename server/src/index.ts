@@ -138,6 +138,33 @@ server.registerTool(
 );
 
 server.registerTool(
+  "record_finding",
+  {
+    description:
+      "Record a finding (a fact learned) under a question or other node. Be honest about confidence. Set `answers` to also close the parent question with this finding. next_options ranks unexplored and low-confidence questions higher.",
+    inputSchema: {
+      id: z.string().describe("Question (or node) the finding informs"),
+      text: z.string().describe("What was found; first line becomes the title"),
+      confidence: z.number().min(0).max(1).optional(),
+      sources: z.array(z.string()).optional().describe("URLs, files, commits backing the finding"),
+      answers: z.boolean().optional().describe("Close the parent question with this finding"),
+    },
+  },
+  ({ id, text, confidence, sources, answers }) =>
+    run(() => {
+      const { node, closed } = store.recordFinding(id, text, confidence, sources, answers ?? false);
+      const out = [`Recorded ${line(node)}${node.confidence != null ? ` (conf ${node.confidence})` : ""} under ${node.parent_id}`];
+      if (closed) {
+        out.push(`Answered ${line(closed.node)}`);
+        if (closed.unblocked.length) out.push(`Unblocked: ${closed.unblocked.map(line).join("; ")}`);
+        if (closed.parentReady)
+          out.push(`All children of ${closed.parentReady.id} "${closed.parentReady.title}" are resolved — consider done(${closed.parentReady.id}).`);
+      }
+      return out.join("\n");
+    }),
+);
+
+server.registerTool(
   "update",
   {
     description:
