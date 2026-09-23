@@ -45,6 +45,16 @@ plantrail next
 plantrail checkpoint "state, next step, anything non-obvious"
 ```
 
+## How a session finds its thread
+
+Each Claude session binds to one thread. At session start the hook picks, in order:
+
+1. The thread this session was already bound to (`--resume`, compaction).
+2. After `/clear`, the thread the same Claude process was using (matched by its pid), so several sessions in one repo each keep their own thread.
+3. The active thread linked most specifically to this location: a thread created or bound in a git worktree or on a branch is linked to that worktree and branch, and wins there over threads linked only to the repo.
+
+If several threads tie, Claude asks which one, noting any that another session bound in the last day. If none is active, it lists recent parked and done threads linked here (`plantrail bind` / `plantrail reopen` to pick one up). Slash commands work without a bound thread; they print how to bind one.
+
 Other commands include `status`, `threads`, `bind`, `park`, `finish`, `finding`, `edge`, `search`, `log`, `history` (every recorded change), `undo` (revert the last command), `get`, `export` (markdown/JSON/HTML), and `serve` (a local live web view on port 7847). Run `plantrail help` for full usage.
 
 ## Development

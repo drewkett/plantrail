@@ -13,7 +13,9 @@ Run it via Bash as `~/.plantrail/bin/plantrail <command>` (the SessionStart hook
 ## At session start
 
 - If context contains an `[plantrail] tN "…"` status block, this directory is bound to that thread. Continue from **Active** or the top **Next** item; read the **Last checkpoint** note first.
-- If it lists multiple threads, ask the user which one, then `plantrail bind tN`.
+- If it lists multiple threads, ask the user which one, then `plantrail bind tN`. Threads marked "bound by another session" are likely in use elsewhere, so suggest the others first.
+- If it lists parked or done threads and the user's task continues one, `plantrail bind tN` (parked) or `plantrail reopen tN` (done).
+- A thread created or bound in a git worktree or branch resumes there automatically, and `/clear` keeps the session's thread, so don't re-bind after either.
 - Otherwise, don't create a thread for small one-off tasks. Create one when work will clearly span many steps or sessions, or the user asks: `plantrail create "Title" --goal "what done looks like"`.
 
 ## Working loop
