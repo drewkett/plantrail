@@ -1037,6 +1037,17 @@ export class Store {
     }
   }
 
+  /** PostToolUse(ExitPlanMode): tell Claude how to track the approved plan saved at `file`. */
+  planHint(file: string, sessionId = this.session): string {
+    const t = this.hookThread(sessionId);
+    const cmd = `~/.plantrail/bin/plantrail import ${file}`;
+    return t
+      ? `[plantrail] Plan saved to ${file}. Bound thread ${t.id} "${t.title}". If its steps aren't already nodes, ` +
+          `preview with \`${cmd} --dry-run\`, then import (add \`--parent nN\` to nest under an existing node).`
+      : `[plantrail] Plan saved to ${file}. No thread is bound here; to track it, ` +
+          `\`~/.plantrail/bin/plantrail create "<title>" --goal "<goal>"\` then \`${cmd}\`.`;
+  }
+
   /** Nodes updated after the thread's last checkpoint (and after `since`, if later). */
   private changedSince(threadId: string, since?: string | null): Node[] {
     const cp = this.db

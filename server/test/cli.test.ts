@@ -57,6 +57,23 @@ test("cli: done --ref HEAD / --commit store the short SHA", () => {
   assert.match(ap(["get", "n2"]).out, new RegExp(`Refs: ${prev}\\b`));
 });
 
+test("cli: import a markdown plan; ExitPlanMode hook saves it and suggests import", () => {
+  const ap = setup();
+  ap(["create", "Demo", "--goal", "g"]);
+  const md = "# Plan\n## Setup\n- [x] done already\n- install deps\n## Build\n";
+  assert.equal(ap(["import", "-", "--dry-run"], md).out, "Setup\n  install deps\nBuild\n(skipped 1 checked item)");
+  assert.equal(ap(["status"]).out.match(/Nodes: (.*)/)?.[1], "none");
+  assert.equal(ap(["import", "-"], md).out, "n1 [task/open] Setup\n  n2 [task/open] install deps\nn3 [task/open] Build\n(skipped 1 checked item)");
+  assert.match(ap(["import", "-"], "prose only").err, /No headings or list items/);
+
+  const hook = ap(["planhook", "--hook"], JSON.stringify({ cwd: ap.cwd, tool_name: "ExitPlanMode", tool_input: { plan: md } }));
+  const ctx = JSON.parse(hook.out).hookSpecificOutput.additionalContext as string;
+  const file = /Plan saved to (\S+)\./.exec(ctx)?.[1];
+  assert.ok(file && existsSync(file) && file.startsWith(join(hook.home, "plans")));
+  assert.match(ctx, /Bound thread t1 "Demo".*import .* --dry-run/);
+  assert.equal(ap(["planhook", "--hook"], JSON.stringify({ cwd: ap.cwd, tool_input: { plan: "no steps" } })).out, "");
+});
+
 test("cli: bad input exits 1/2 without a stack trace", () => {
   const ap = setup();
   ap(["create", "Demo", "--goal", "g"]);

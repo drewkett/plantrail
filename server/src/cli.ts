@@ -7,6 +7,7 @@ import { exportHtml } from "./html.ts";
 import { serve } from "./serve.ts";
 import * as fmt from "./format.ts";
 import { shortSha } from "./repo.ts";
+import { planItems } from "./markdown.ts";
 import { EDGE_TYPES, NODE_KINDS, PlantrailError, Store, type AddItem, type EdgeType, type NodeKind, type NodeStatus } from "./store.ts";
 
 const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
@@ -26,6 +27,8 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   add -                                    add items from a JSON array on stdin
                                            ({title, kind?, parent?, body?, priority?, blocks?, blocked_by?};
                                             "#i" refers to the i-th item of the same array; #1 is the first)
+  import FILE|- [--parent ID] [--dry-run]  add a markdown plan as nodes: headings and list items become
+                                           tasks (nested), other text their bodies; [x] items skipped
   start ID                                 mark active (refuses if blocked)
   done ID --summary S [--ref R]... [--commit]
                                            complete; summary required. --ref HEAD (or HEAD~N)
@@ -49,7 +52,8 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   resume [--session ID] [--hook]           SessionStart: bind + print status
                                            (--hook: read {cwd, session_id} JSON from stdin)
   stop --hook                              Stop hook: remind once to checkpoint after changes
-  precompact --hook                        PreCompact hook: auto-checkpoint if anything changed`;
+  precompact --hook                        PreCompact hook: auto-checkpoint if anything changed
+  planhook --hook                          PostToolUse(ExitPlanMode) hook: save the plan, suggest import`;
 
 const UPDATE_STATUSES = ["open", "blocked", "abandoned"] as const;
 
@@ -57,7 +61,13 @@ function readStdin(): string {
   return readFileSync(0, "utf8");
 }
 
-function readHookInput(): { cwd?: string; session_id?: string; stop_hook_active?: boolean; trigger?: string } {
+function readHookInput(): {
+  cwd?: string;
+  session_id?: string;
+  stop_hook_active?: boolean;
+  trigger?: string;
+  tool_input?: { plan?: string };
+} {
   try {
     return JSON.parse(readStdin());
   } catch {
@@ -150,6 +160,7 @@ function main(argv = process.argv.slice(2)): number {
       summary: { type: "string" },
       ref: { type: "string", multiple: true },
       commit: { type: "boolean" },
+      "dry-run": { type: "boolean" },
       confidence: { type: "string" },
       source: { type: "string", multiple: true },
       title: { type: "string" },
@@ -207,6 +218,27 @@ function main(argv = process.argv.slice(2)): number {
     case "precompact": {
       const cp = store.autoCheckpoint(undefined, input.trigger === "manual" ? "/compact" : "auto-compaction");
       if (cp) out(JSON.stringify({ systemMessage: `plantrail: saved checkpoint #${cp.id} on ${cp.thread} before compaction` }));
+      return 0;
+    }
+    case "planhook": {
+      const plan = input.tool_input?.plan;
+      if (!plan?.trim() || !planItems(plan).items.length) return 0;
+      const dir = join(plantrailHome(), "plans");
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}-${(session ?? "plan").slice(0, 8)}.md`);
+      writeFileSync(file, plan);
+      out(JSON.stringify({
+        hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: store.planHint(file) },
+      }));
+      return 0;
+    }
+    case "import": {
+      const md = need(arg, "FILE (or '-' for stdin)") === "-" ? readStdin() : readFileSync(arg!, "utf8");
+      const { items, skipped } = planItems(md, v.parent);
+      if (!items.length) throw new PlantrailError("No headings or list items to import");
+      const note = skipped ? `(skipped ${skipped} checked item${skipped === 1 ? "" : "s"})` : null;
+      out(fmt.formatImport(items, v["dry-run"] ? null : store.add(items)));
+      if (note) out(note);
       return 0;
     }
     case "status":

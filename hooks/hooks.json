@@ -20,6 +20,14 @@
           { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/dist/cli.js\" stop --hook", "timeout": 10 }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/server/dist/cli.js\" planhook --hook", "timeout": 10 }
+        ]
+      }
     ]
   }
 }

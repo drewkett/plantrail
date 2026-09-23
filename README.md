@@ -20,6 +20,7 @@ On first session start, the plugin installs a shim at `~/.plantrail/bin/plantrai
 - **SessionStart hook**: resolves the thread bound to the current directory and prints its status (goal, active node, next items, last checkpoint) into context.
 - **PreCompact hook**: saves an automatic checkpoint if anything changed.
 - **Stop hook**: reminds Claude once to mark finished nodes done and checkpoint.
+- **PostToolUse hook on ExitPlanMode**: saves the approved plan to `~/.plantrail/plans/` and suggests `plantrail import` so its steps become nodes.
 - **Skills**: `plantrail` (the task-tracking workflow) and `research` (open-ended research as a tree of questions and findings with confidence levels).
 - **Commands**:
   - `/plantrail:status`: summarize the bound thread.

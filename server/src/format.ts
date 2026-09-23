@@ -1,7 +1,7 @@
 // Result formatting for the CLI. `doneHint` renders the "complete the parent"
 // suggestion in the caller's syntax.
 import type { LinkKey } from "./repo.ts";
-import type { LogEntry, Node, Option, SearchHit, Thread } from "./store.ts";
+import type { AddItem, LogEntry, Node, Option, SearchHit, Thread } from "./store.ts";
 
 export type DoneHint = (id: string) => string;
 type Closed = { node: Node; unblocked: Node[]; parentReady: Node | null };
@@ -55,6 +55,18 @@ export function formatNext(opts: Option[]): string {
   if (!opts.length) return "Nothing open and unblocked.";
   return opts
     .map((o) => `${line(o.node)}${o.thread_title != null ? ` (${o.node.thread_id} "${o.thread_title}")` : ""}  (score ${o.score}: ${o.why})`)
+    .join("\n");
+}
+
+/** Imported items as an indented tree: the created nodes, or just titles for a dry run. */
+export function formatImport(items: AddItem[], nodes: Node[] | null): string {
+  const depth: number[] = [];
+  return items
+    .map((it, i) => {
+      const m = /^#(\d+)$/.exec(it.parent ?? "");
+      depth[i] = m ? depth[Number(m[1]) - 1] + 1 : 0;
+      return "  ".repeat(depth[i]) + (nodes ? line(nodes[i]) : it.title);
+    })
     .join("\n");
 }
 
