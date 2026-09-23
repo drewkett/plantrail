@@ -62,6 +62,13 @@ export interface Option {
   thread_title?: string;
 }
 
+/** A thread's nodes, children by parent id, and open blocker ids by node id. */
+interface Graph {
+  nodes: Map<string, Node>;
+  kids: Map<string, Node[]>;
+  blockers: Map<string, string[]>;
+}
+
 const byScore = (a: Option, b: Option) =>
   b.score - a.score ||
   a.node.created_at.localeCompare(b.node.created_at) ||
@@ -172,20 +179,6 @@ export class Store {
     return this.db
       .prepare("SELECT * FROM nodes WHERE parent_id = ? ORDER BY priority DESC, rowid")
       .all(id) as unknown as Node[];
-  }
-
-  private depth(node: Node): number {
-    let d = 0;
-    let p = node.parent_id;
-    const seen = new Set([node.id]);
-    // Guard against parent cycles in existing data.
-    while (p && !seen.has(p)) {
-      seen.add(p);
-      d++;
-      p = (this.db.prepare("SELECT parent_id FROM nodes WHERE id = ?").get(p) as { parent_id: string | null })
-        .parent_id;
-    }
-    return d;
   }
 
   // ---------- threads & binding ----------
@@ -568,14 +561,6 @@ export class Store {
     });
   }
 
-  /** Finding count and best confidence under a node (null if none recorded a confidence). */
-  private evidence(id: string): { count: number; best: number | null } {
-    const r = this.db
-      .prepare("SELECT COUNT(*) AS count, MAX(confidence) AS best FROM nodes WHERE parent_id = ? AND kind = 'finding'")
-      .get(id) as { count: number; best: number | null };
-    return { count: Number(r.count), best: r.best };
-  }
-
   update(
     id: string,
     fields: {
@@ -712,28 +697,35 @@ export class Store {
    * goes where the uncertainty is.
    */
   nextOptions(n = 3, threadId?: string): Option[] {
-    const tid = threadId ?? this.current().id;
-    const cands = this.db
-      .prepare(
-        `SELECT * FROM nodes WHERE thread_id = ? AND status = 'open' AND kind IN ('task','question')`,
-      )
-      .all(tid) as unknown as Node[];
+    return this.rank(this.graph(threadId ?? this.current().id), n);
+  }
+
+  private rank(g: Graph, n: number): Option[] {
     const now = this.now().getTime();
     const opts: Option[] = [];
-    for (const node of cands) {
-      if (this.blockers(node.id).length) continue;
-      const openKids = this.children(node.id).filter((c) => !RESOLVED.includes(c.status)).length;
-      const depth = this.depth(node);
+    for (const node of g.nodes.values()) {
+      if (node.status !== "open" || (node.kind !== "task" && node.kind !== "question")) continue;
+      if (g.blockers.has(node.id)) continue;
+      const kids = g.kids.get(node.id) ?? [];
+      const openKids = kids.filter((c) => !RESOLVED.includes(c.status)).length;
+      let depth = 0;
+      // Guard against parent cycles in existing data.
+      for (let p = node.parent_id, seen = new Set([node.id]); p && g.nodes.has(p) && !seen.has(p); p = g.nodes.get(p)!.parent_id) {
+        seen.add(p);
+        depth++;
+      }
       const staleDays = Math.min(7, (now - Date.parse(node.updated_at)) / DAY);
       const leaf = openKids === 0 ? 5 : 0;
       let research = 0;
       let researchWhy: string | null = null;
       if (node.kind === "question") {
-        const ev = this.evidence(node.id);
-        if (!ev.count) [research, researchWhy] = [3, "unexplored"];
-        else if (ev.best == null || ev.best < 0.7) {
-          research = 3 * (1 - (ev.best ?? 0.5));
-          researchWhy = `low confidence ${ev.best ?? "unrated"}`;
+        const findings = kids.filter((c) => c.kind === "finding");
+        const confs = findings.map((f) => f.confidence).filter((c) => c != null);
+        const best = confs.length ? Math.max(...confs) : null;
+        if (!findings.length) [research, researchWhy] = [3, "unexplored"];
+        else if (best == null || best < 0.7) {
+          research = 3 * (1 - (best ?? 0.5));
+          researchWhy = `low confidence ${best ?? "unrated"}`;
         }
       }
       const score = node.priority * 10 + leaf + depth * 1.5 + staleDays * 0.5 + research;
@@ -749,6 +741,28 @@ export class Store {
       opts.push({ node, score: Math.round(score * 10) / 10, why });
     }
     return opts.sort(byScore).slice(0, n);
+  }
+
+  /**
+   * A thread's nodes, children by parent, and open blockers by node, loaded in
+   * two queries so ranking doesn't query per candidate.
+   */
+  private graph(threadId: string): Graph {
+    const rows = this.db
+      .prepare("SELECT * FROM nodes WHERE thread_id = ? ORDER BY priority DESC, rowid")
+      .all(threadId) as unknown as Node[];
+    const nodes = new Map(rows.map((n) => [n.id, n]));
+    const kids = new Map<string, Node[]>();
+    for (const n of rows) if (n.parent_id) kids.set(n.parent_id, [...(kids.get(n.parent_id) ?? []), n]);
+    const blockers = new Map<string, string[]>();
+    const edges = this.db
+      .prepare(
+        `SELECT e.from_id, e.to_id FROM edges e JOIN nodes b ON b.id = e.from_id JOIN nodes t ON t.id = e.to_id
+         WHERE t.thread_id = ? AND e.type = 'blocks' AND b.status NOT IN ('done','abandoned')`,
+      )
+      .all(threadId) as { from_id: string; to_id: string }[];
+    for (const e of edges) blockers.set(e.to_id, [...(blockers.get(e.to_id) ?? []), e.from_id]);
+    return { nodes, kids, blockers };
   }
 
   /** nextOptions merged across every active thread, each tagged with its thread title. */
@@ -853,21 +867,14 @@ export class Store {
 
   statusText(threadId?: string): string {
     const t = threadId ? this.getThread(threadId) : this.current();
-    const counts = Object.fromEntries(
-      (
-        this.db
-          .prepare("SELECT status, COUNT(*) AS c FROM nodes WHERE thread_id = ? GROUP BY status")
-          .all(t.id) as { status: string; c: number }[]
-      ).map((r) => [r.status, r.c]),
+    const g = this.graph(t.id);
+    const all = [...g.nodes.values()];
+    const counts: Record<string, number> = {};
+    for (const n of all) counts[n.status] = (counts[n.status] ?? 0) + 1;
+    const active = all.filter((n) => n.status === "active");
+    const blocked = all.filter(
+      (n) => n.status === "blocked" || (n.status === "open" && g.blockers.has(n.id)),
     );
-    const active = this.db
-      .prepare("SELECT * FROM nodes WHERE thread_id = ? AND status = 'active'")
-      .all(t.id) as unknown as Node[];
-    const blocked = (
-      this.db
-        .prepare("SELECT * FROM nodes WHERE thread_id = ? AND status IN ('open','blocked') ORDER BY priority DESC")
-        .all(t.id) as unknown as Node[]
-    ).filter((n) => n.status === "blocked" || this.blockers(n.id).length);
     const cp = this.db
       .prepare("SELECT note, created_at FROM checkpoints WHERE thread_id = ? ORDER BY id DESC LIMIT 1")
       .get(t.id) as { note: string; created_at: string } | undefined;
@@ -886,7 +893,7 @@ export class Store {
       };
       lines.push(`Active: ${active.map((n) => fmt(n) + flag(n)).join("; ")}`);
     }
-    const next = this.nextOptions(3, t.id);
+    const next = this.rank(g, 3);
     if (next.length) {
       lines.push("Next:");
       for (const o of next) lines.push(`  ${fmt(o.node)}`);
@@ -894,7 +901,7 @@ export class Store {
     if (blocked.length) {
       lines.push("Blocked:");
       for (const b of blocked.slice(0, 5)) {
-        const by = this.blockers(b.id).map((x) => x.id);
+        const by = g.blockers.get(b.id) ?? [];
         lines.push(`  ${fmt(b)}${by.length ? ` ← ${by.join(", ")}` : ""}`);
       }
       if (blocked.length > 5) lines.push(`  …${blocked.length - 5} more`);
