@@ -55,7 +55,14 @@ export interface Option {
   node: Node;
   score: number;
   why: string;
+  /** Set by nextOptionsAll, which ranks across threads. */
+  thread_title?: string;
 }
+
+const byScore = (a: Option, b: Option) =>
+  b.score - a.score ||
+  a.node.created_at.localeCompare(b.node.created_at) ||
+  a.node.id.localeCompare(b.node.id, undefined, { numeric: true });
 
 export interface SearchHit {
   node: Node;
@@ -738,8 +745,15 @@ export class Store {
         .join(", ");
       opts.push({ node, score: Math.round(score * 10) / 10, why });
     }
-    opts.sort((a, b) => b.score - a.score || a.node.created_at.localeCompare(b.node.created_at) || a.node.id.localeCompare(b.node.id, undefined, { numeric: true }));
-    return opts.slice(0, n);
+    return opts.sort(byScore).slice(0, n);
+  }
+
+  /** nextOptions merged across every active thread, each tagged with its thread title. */
+  nextOptionsAll(n = 3): Option[] {
+    return this.listThreads("active")
+      .flatMap((t) => this.nextOptions(n, t.id).map((o) => ({ ...o, thread_title: t.title })))
+      .sort(byScore)
+      .slice(0, n);
   }
 
   // ---------- search ----------

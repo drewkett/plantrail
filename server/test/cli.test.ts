@@ -29,6 +29,7 @@ test("cli: create, add via stdin, workflow rules, status", () => {
   assert.match(ap(["done", "n1"]).err, /Missing --summary/);
   assert.match(ap(["done", "n1", "--summary", "did it", "--ref", "x.ts"]).out, /Unblocked: n2/);
   assert.match(ap(["next"]).out, /^n2 /);
+  assert.match(ap(["next", "--all"]).out, /^n2 \[question\/open\] b \(t1 "Demo"\)  \(score /);
   assert.equal(ap(["checkpoint", "note"]).code, 0);
   assert.match(ap(["status"]).out, /Last checkpoint .*: note/);
   assert.equal(ap(["finding", "n2", "it", "works", "--confidence", "0.7", "--source", "a.md"]).out, "Recorded n3 [finding/done] it works (conf 0.7) under n2");

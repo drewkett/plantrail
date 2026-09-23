@@ -118,6 +118,19 @@ test("next_options: stale nodes float up", () => {
   assert.match(store.nextOptions(1)[0].why, /idle 5d/);
 });
 
+test("nextOptionsAll ranks across active threads only", () => {
+  const { store } = setup();
+  store.add([{ title: "here" }]);
+  const t2 = store.createThread("Second", "g");
+  const [urgent] = store.add([{ title: "urgent", priority: 2 }]);
+  const t3 = store.createThread("Finished", "g");
+  store.add([{ title: "hidden", priority: 9 }]);
+  store.finishThread(t3.id);
+  const opts = store.nextOptionsAll(5);
+  assert.deepEqual(opts.map((o) => [o.node.id, o.thread_title]), [[urgent.id, "Second"], ["n1", "Test"]]);
+  assert.equal(store.nextOptions(5, t2.id)[0].thread_title, undefined);
+});
+
 test("status is compact and includes checkpoint", () => {
   const { store } = setup();
   const [a] = store.add([{ title: "a" }, { title: "b", blocked_by: ["#1"] }]);

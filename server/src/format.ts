@@ -53,7 +53,9 @@ export function formatUpdate(r: { node: Node; unblocked: Node[] }): string {
 
 export function formatNext(opts: Option[]): string {
   if (!opts.length) return "Nothing open and unblocked.";
-  return opts.map((o) => `${line(o.node)}  (score ${o.score}: ${o.why})`).join("\n");
+  return opts
+    .map((o) => `${line(o.node)}${o.thread_title != null ? ` (${o.node.thread_id} "${o.thread_title}")` : ""}  (score ${o.score}: ${o.why})`)
+    .join("\n");
 }
 
 export function formatSearch(hits: SearchHit[], all?: boolean): string {

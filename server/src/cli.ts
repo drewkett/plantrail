@@ -34,7 +34,7 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
             [--parent ID|none]             (--parent moves the node; none = top level)
   edge FROM TYPE TO [--remove]             add/remove an edge; TYPE: blocks, derived_from, contradicts
   delete ID                                delete a mistaken leaf node with no edges
-  next [-n N]                              ranked options to work on next
+  next [-n N] [--all]                      ranked options to work on next (--all: across every active thread)
   log [-n N]                               recent checkpoints and done/abandoned nodes (default 10)
   get ID [--depth D]                       full node detail (+ subtree)
   search QUERY [--all] [--kind K] [-n N]   full-text search this thread (--all: every thread);
@@ -317,7 +317,8 @@ function main(argv = process.argv.slice(2)): number {
       return 0;
     }
     case "next": {
-      out(fmt.formatNext(store.nextOptions(intOf(v.n, "-n") ?? 3)));
+      const n = intOf(v.n, "-n") ?? 3;
+      out(fmt.formatNext(v.all ? store.nextOptionsAll(n) : store.nextOptions(n)));
       return 0;
     }
     case "log":
