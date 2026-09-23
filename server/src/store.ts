@@ -3,9 +3,12 @@ import { isAbsolute } from "node:path";
 import type { DB } from "./db.ts";
 import { locationKeys, unpushedCount, type LinkKey } from "./repo.ts";
 
-export type NodeKind = "task" | "question" | "finding" | "decision";
-export type EdgeType = "blocks" | "derived_from" | "contradicts";
-export type NodeStatus = "open" | "active" | "blocked" | "done" | "abandoned";
+export const NODE_KINDS = ["task", "question", "finding", "decision"] as const;
+export const EDGE_TYPES = ["blocks", "derived_from", "contradicts"] as const;
+export const NODE_STATUSES = ["open", "active", "blocked", "done", "abandoned"] as const;
+export type NodeKind = (typeof NODE_KINDS)[number];
+export type EdgeType = (typeof EDGE_TYPES)[number];
+export type NodeStatus = (typeof NODE_STATUSES)[number];
 export type ThreadStatus = "active" | "parked" | "done";
 
 export interface Thread {
@@ -870,7 +873,7 @@ export class Store {
       .get(t.id) as { note: string; created_at: string } | undefined;
     const lines = [`[plantrail] ${t.id} "${t.title}" (${t.status})`];
     if (t.goal) lines.push(`Goal: ${clip(t.goal, 200)}`);
-    const countStr = ["open", "active", "blocked", "done", "abandoned"]
+    const countStr = NODE_STATUSES
       .filter((s) => counts[s])
       .map((s) => `${counts[s]} ${s}`)
       .join(", ");

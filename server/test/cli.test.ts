@@ -34,6 +34,11 @@ test("cli: create, add via stdin, workflow rules, status", () => {
   assert.match(ap(["status"]).out, /Last checkpoint .*: note/);
   assert.equal(ap(["finding", "n2", "it", "works", "--confidence", "0.7", "--source", "a.md"]).out, "Recorded n3 [finding/done] it works (conf 0.7) under n2");
   assert.match(ap(["finding", "n2", "x", "--confidence", "high"]).err, /must be a number/);
+  assert.match(ap(["finding", "n2", "x", "--confidence", ""]).err, /must be a number/);
+  assert.match(ap(["add", "c", "--kind", "bug"]).err, /--kind must be one of task, question, finding, decision/);
+  assert.match(ap(["update", "n1", "--status", "done"]).err, /--status must be one of open, blocked, abandoned \(use start\/done/);
+  assert.match(ap(["edge", "n1", "follows", "n2"]).err, /TYPE must be one of blocks, derived_from, contradicts/);
+  assert.match(ap(["edge", "n1"]).err, /Missing TYPE/);
 });
 
 test("cli: bad input exits 1/2 without a stack trace", () => {

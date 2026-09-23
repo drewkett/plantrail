@@ -6,7 +6,7 @@ import { plantrailHome, openDb } from "./db.ts";
 import { exportHtml } from "./html.ts";
 import { serve } from "./serve.ts";
 import * as fmt from "./format.ts";
-import { PlantrailError, Store, type AddItem, type EdgeType, type NodeKind, type NodeStatus } from "./store.ts";
+import { EDGE_TYPES, NODE_KINDS, PlantrailError, Store, type AddItem, type EdgeType, type NodeKind, type NodeStatus } from "./store.ts";
 
 const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   status                                   compact view of the bound thread
@@ -48,8 +48,7 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   stop --hook                              Stop hook: remind once to checkpoint after changes
   precompact --hook                        PreCompact hook: auto-checkpoint if anything changed`;
 
-const EDGE_TYPES = ["blocks", "derived_from", "contradicts"];
-const KINDS = ["task", "question", "finding", "decision"];
+const UPDATE_STATUSES = ["open", "blocked", "abandoned"] as const;
 
 function readStdin(): string {
   return readFileSync(0, "utf8");
@@ -83,9 +82,19 @@ function need(v: string | undefined, what: string): string {
   return v;
 }
 
-function kindOf(v: string | undefined): NodeKind | undefined {
-  if (v !== undefined && !KINDS.includes(v)) throw new PlantrailError(`--kind must be one of ${KINDS.join(", ")}`);
-  return v as NodeKind | undefined;
+function oneOf<T extends string>(v: string | undefined, allowed: readonly T[], what: string, hint = ""): T | undefined {
+  if (v !== undefined && !(allowed as readonly string[]).includes(v))
+    throw new PlantrailError(`${what} must be one of ${allowed.join(", ")}${hint}`);
+  return v as T | undefined;
+}
+
+const kindOf = (v: string | undefined): NodeKind | undefined => oneOf(v, NODE_KINDS, "--kind");
+
+function numOf(v: string | undefined, what: string, range: string): number | undefined {
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  if (v.trim() === "" || Number.isNaN(n)) throw new PlantrailError(`${what} must be a number ${range}`);
+  return n;
 }
 
 function intOf(v: string | undefined, what: string): number | undefined {
@@ -272,27 +281,21 @@ function main(argv = process.argv.slice(2)): number {
     }
     case "finding": {
       const [id, ...rest] = args;
-      let conf: number | undefined;
-      if (v.confidence !== undefined) {
-        conf = Number(v.confidence);
-        if (Number.isNaN(conf)) throw new PlantrailError("--confidence must be a number between 0 and 1");
-      }
       out(fmt.formatFinding(store.recordFinding(
         need(id, "ID"),
         need(rest.join(" ") || undefined, "TEXT"),
-        conf,
+        numOf(v.confidence, "--confidence", "between 0 and 1"),
         v.source,
         v.answers,
       ), doneHint));
       return 0;
     }
     case "update": {
-      if (v.status !== undefined && !["open", "blocked", "abandoned"].includes(v.status))
-        throw new PlantrailError("--status must be open, blocked, or abandoned (use start/done otherwise)");
+      const status = oneOf<NodeStatus>(v.status, UPDATE_STATUSES, "--status", " (use start/done otherwise)");
       const r = store.update(need(arg, "ID"), {
         title: v.title,
         body: v.body,
-        status: v.status as NodeStatus | undefined,
+        status,
         priority: intOf(v.priority, "--priority"),
         summary: v.summary,
         kind: kindOf(v.kind),
@@ -302,11 +305,12 @@ function main(argv = process.argv.slice(2)): number {
       return 0;
     }
     case "edge": {
-      const [from, type, to] = [need(args[0], "FROM"), need(args[1], "TYPE"), need(args[2], "TO")];
-      if (!EDGE_TYPES.includes(type)) throw new PlantrailError(`TYPE must be one of ${EDGE_TYPES.join(", ")}`);
-      if (v.remove) out(fmt.formatEdge(from, type, to, true, store.removeEdge(from, type as EdgeType, to).unblocked));
+      const from = need(args[0], "FROM");
+      const type = oneOf<EdgeType>(need(args[1], "TYPE"), EDGE_TYPES, "TYPE")!;
+      const to = need(args[2], "TO");
+      if (v.remove) out(fmt.formatEdge(from, type, to, true, store.removeEdge(from, type, to).unblocked));
       else {
-        store.addEdge(from, type as EdgeType, to);
+        store.addEdge(from, type, to);
         out(fmt.formatEdge(from, type, to, false));
       }
       return 0;
