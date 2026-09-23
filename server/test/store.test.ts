@@ -138,6 +138,26 @@ test("resume binds by session, then by linked location", () => {
   assert.match(new Store(db, dir, now).resume("s2"), /Multiple active threads/);
 });
 
+test("current() prefers this session's binding over the cwd's latest", () => {
+  const { store, db, dir } = setup();
+  const now = store.now;
+  const a = new Store(db, dir, now);
+  a.session = "sA";
+  a.resume();
+  const b = new Store(db, dir, now);
+  b.session = "sB";
+  const t2 = b.createThread("Second", "g");
+  const later = new Store(db, dir, now);
+  later.session = "sA";
+  assert.equal(later.current().id, "t1");
+  assert.equal(new Store(db, dir, now).current().id, t2.id);
+  // A parked session thread falls through to the cwd's latest binding.
+  store.setThreadStatus("t1", "parked");
+  const parked = new Store(db, dir, now);
+  parked.session = "sA";
+  assert.equal(parked.current().id, t2.id);
+});
+
 test("current() falls back to latest binding in cwd", () => {
   const { store, db, dir } = setup();
   const now = store.now;

@@ -87,6 +87,8 @@ const DAY = 86_400_000;
 export class Store {
   /** Thread bound to this process: explicit --thread, else resolved by current(). */
   bound: string | null = null;
+  /** Claude session this process runs in (hook payload or $CLAUDE_CODE_SESSION_ID), if known. */
+  session: string | null = null;
 
   readonly db: DB;
   readonly cwd: string;
@@ -178,7 +180,7 @@ export class Store {
 
   // ---------- threads & binding ----------
 
-  createThread(title: string, goal: string, linkCwd = true, sessionId?: string): Thread {
+  createThread(title: string, goal: string, linkCwd = true, sessionId = this.session): Thread {
     return this.tx(() => {
       const id = this.nextId("t");
       const now = this.ts();
@@ -257,7 +259,7 @@ export class Store {
       .all(status, ...keys.flatMap((k) => [k.kind, k.value]), limit) as unknown as Thread[];
   }
 
-  private bindInner(threadId: string, sessionId?: string): void {
+  private bindInner(threadId: string, sessionId = this.session): void {
     this.bound = threadId;
     // Record under the real session id if known; otherwise a per-cwd pseudo session
     // so later processes in the same directory can pick the binding up.
@@ -271,7 +273,7 @@ export class Store {
   }
 
   /** Binding a parked thread reactivates it. Done threads stay done. */
-  bind(threadId: string, sessionId?: string): Thread {
+  bind(threadId: string, sessionId = this.session): Thread {
     const t = this.getThread(threadId);
     if (t.status === "parked") this.setThreadStatus(t.id, "active");
     this.bindInner(t.id, sessionId);
@@ -320,13 +322,27 @@ export class Store {
       .all(cutoff) as unknown as Thread[];
   }
 
+  /** Active thread bound to a session, if any. */
+  private sessionThread(sessionId: string | null): string | null {
+    if (!sessionId) return null;
+    const r = this.db
+      .prepare(
+        `SELECT s.thread_id FROM sessions s JOIN threads t ON t.id = s.thread_id
+         WHERE s.session_id = ? AND t.status = 'active'`,
+      )
+      .get(sessionId) as { thread_id: string } | undefined;
+    return r?.thread_id ?? null;
+  }
+
   /**
-   * Thread for the current process: explicit binding, else the most recent
-   * session binding in this cwd (written by the SessionStart hook), else the
-   * single active thread linked to this location.
+   * Thread for the current process: explicit binding, else this session's
+   * binding, else the most recent binding in this cwd (for callers without a
+   * session id), else the single active thread linked to this location.
    */
   current(): Thread {
     if (this.bound) return this.getThread(this.bound);
+    const own = this.sessionThread(this.session);
+    if (own) return this.getThread((this.bound = own));
     const recent = this.db
       .prepare(
         `SELECT s.thread_id FROM sessions s JOIN threads t ON t.id = s.thread_id
@@ -970,20 +986,11 @@ export class Store {
     return L.join("\n") + "\n";
   }
 
-  /** SessionStart helper: bind session to the thread for cwd and describe it. */
   // ---------- lifecycle hooks ----------
 
-  /** Thread for a hook: the session's own binding if known, else the cwd's. Null when none. */
-  private hookThread(sessionId?: string): Thread | null {
-    if (sessionId) {
-      const r = this.db
-        .prepare(
-          `SELECT s.thread_id FROM sessions s JOIN threads t ON t.id = s.thread_id
-           WHERE s.session_id = ? AND t.status = 'active'`,
-        )
-        .get(sessionId) as { thread_id: string } | undefined;
-      if (r) return this.getThread((this.bound = r.thread_id));
-    }
+  /** Thread for a hook: current(), as `sessionId`. Null when none. */
+  private hookThread(sessionId = this.session): Thread | null {
+    this.session = sessionId;
     try {
       return this.current();
     } catch (e) {
@@ -1008,7 +1015,7 @@ export class Store {
    * reminder to record progress (null otherwise). Nudges again only after
    * further changes.
    */
-  stopNudge(sessionId?: string): string | null {
+  stopNudge(sessionId = this.session): string | null {
     const t = this.hookThread(sessionId);
     if (!t) return null;
     const changed = this.changedSince(t.id, t.nudged_at);
@@ -1023,7 +1030,7 @@ export class Store {
   }
 
   /** PreCompact hook: save an automatic checkpoint if anything changed since the last one. */
-  autoCheckpoint(sessionId?: string, trigger = "compaction"): { id: number; thread: string } | null {
+  autoCheckpoint(sessionId = this.session, trigger = "compaction"): { id: number; thread: string } | null {
     const t = this.hookThread(sessionId);
     if (!t) return null;
     const changed = this.changedSince(t.id);
@@ -1039,22 +1046,16 @@ export class Store {
     return { ...this.checkpoint(note), thread: t.id };
   }
 
-  resume(sessionId?: string): string {
+  /** SessionStart: bind the session to its previous thread or the one linked here, and describe it. */
+  resume(sessionId = this.session): string {
     this.autoPark();
+    const prev = this.sessionThread(sessionId);
+    if (prev) {
+      this.bindInner(prev, sessionId);
+      return this.statusText(prev);
+    }
     const keys = locationKeys(this.cwd);
     const linked = this.threadsForLocation(keys);
-    if (sessionId) {
-      const prev = this.db
-        .prepare(
-          `SELECT s.thread_id FROM sessions s JOIN threads t ON t.id = s.thread_id
-           WHERE s.session_id = ? AND t.status = 'active'`,
-        )
-        .get(sessionId) as { thread_id: string } | undefined;
-      if (prev) {
-        this.bindInner(prev.thread_id, sessionId);
-        return this.statusText(prev.thread_id);
-      }
-    }
     if (linked.length === 1) {
       // Matched on some key (e.g. the origin URL after a move): add the others so
       // this location keeps matching even if that key changes later.

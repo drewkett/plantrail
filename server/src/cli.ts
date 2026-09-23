@@ -158,13 +158,16 @@ function main(argv = process.argv.slice(2)): number {
     session ??= input.session_id;
   }
   const store = new Store(openDb(), cwd ?? process.cwd());
+  // Claude Code exports the session id to Bash commands, so CLI calls resolve
+  // this session's own binding even when other sessions share the cwd.
+  store.session = session ?? process.env.CLAUDE_CODE_SESSION_ID ?? null;
   if (v.thread) store.bound = store.getThread(v.thread).id;
   const out = (s: string) => console.log(s);
 
   switch (cmd) {
     case "resume": {
       installShim();
-      const text = store.resume(session);
+      const text = store.resume();
       if (!text) return 0;
       if (v.hook) {
         // JSON output: full status goes to Claude's context, a one-line notice to the user.
@@ -183,12 +186,12 @@ function main(argv = process.argv.slice(2)): number {
     case "stop": {
       // Stop hook: block once with a reminder so Claude records progress.
       if (input.stop_hook_active) return 0;
-      const reason = store.stopNudge(session);
+      const reason = store.stopNudge();
       if (reason) out(JSON.stringify({ decision: "block", reason }));
       return 0;
     }
     case "precompact": {
-      const cp = store.autoCheckpoint(session, input.trigger === "manual" ? "/compact" : "auto-compaction");
+      const cp = store.autoCheckpoint(undefined, input.trigger === "manual" ? "/compact" : "auto-compaction");
       if (cp) out(JSON.stringify({ systemMessage: `plantrail: saved checkpoint #${cp.id} on ${cp.thread} before compaction` }));
       return 0;
     }

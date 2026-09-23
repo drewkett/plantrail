@@ -10,8 +10,11 @@ const CLI = join(import.meta.dirname, "../src/cli.ts");
 function setup() {
   const home = mkdtempSync(join(tmpdir(), "plantrail-home-"));
   const cwd = mkdtempSync(join(tmpdir(), "plantrail-cwd-"));
-  return (args: string[], input?: string) => {
-    const r = spawnSync("node", [CLI, "--cwd", cwd, ...args], { input, encoding: "utf8", env: { ...process.env, PLANTRAIL_HOME: home } });
+  return (args: string[], input?: string, session?: string) => {
+    const env: NodeJS.ProcessEnv = { ...process.env, PLANTRAIL_HOME: home };
+    delete env.CLAUDE_CODE_SESSION_ID;
+    if (session) env.CLAUDE_CODE_SESSION_ID = session;
+    const r = spawnSync("node", [CLI, "--cwd", cwd, ...args], { input, encoding: "utf8", env });
     return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim(), home };
   };
 }
@@ -91,4 +94,18 @@ test("cli: unlink reports bad input as a clean error", () => {
     assert.equal(r.code, 1);
     assert.doesNotMatch(r.err, /\n\s+at /);
   }
+});
+
+test("cli: sessions sharing a cwd keep their own thread via CLAUDE_CODE_SESSION_ID", () => {
+  const ap = setup();
+  ap(["create", "One", "--goal", "g"], undefined, "sA");
+  ap(["create", "Two", "--goal", "g"], undefined, "sB");
+  assert.match(ap(["status"], undefined, "sA").out, /t1 "One"/);
+  assert.match(ap(["status"], undefined, "sB").out, /t2 "Two"/);
+  ap(["add", "for one"], undefined, "sA");
+  assert.match(ap(["get", "n1"], undefined, "sA").out, /thread t1/);
+  // No session id: most recent binding in this cwd.
+  assert.match(ap(["status"]).out, /t2 "Two"/);
+  // The hook's session_id and the env var name the same binding.
+  assert.match(ap(["resume", "--hook"], JSON.stringify({ session_id: "sA" }), "sA").out, /t1 \\"One\\"/);
 });
