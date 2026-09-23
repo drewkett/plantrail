@@ -374,7 +374,7 @@ test("stop hook nudges once per batch of changes; precompact auto-checkpoints", 
   assert.match(store.stopNudge() ?? "", /n1 \(done\)/);
   const cp = store.autoCheckpoint(undefined, "/compact");
   assert.ok(cp);
-  assert.match(store.statusText(), /Last checkpoint .*auto \(before \/compact\).*Changed: n1 done/);
+  assert.match(store.statusText(), /Last checkpoint .*auto \(before \/compact\).*Changed: n1 done "a"\./);
   clock.advance(1000);
   assert.equal(store.stopNudge(), null);
 });

@@ -1246,7 +1246,7 @@ export class Store {
     const note = [
       `auto (before ${trigger}); no manual checkpoint since these changes.`,
       active.length ? `Active: ${active.join("; ")}.` : null,
-      `Changed: ${changed.map((n) => `${n.id} ${n.status}`).join(", ")}.`,
+      `Changed: ${changed.slice(0, 10).map((n) => `${n.id} ${n.status} "${clip(n.title, 60)}"`).join(", ")}${changed.length > 10 ? `, +${changed.length - 10} more` : ""}.`,
     ]
       .filter(Boolean)
       .join(" ");
