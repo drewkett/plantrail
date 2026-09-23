@@ -588,3 +588,36 @@ test("concurrent opens of a fresh db migrate once", async () => {
   const db = openDb(file);
   assert.equal((db.prepare("SELECT count(*) AS c FROM counters").get() as { c: number }).c, 2);
 });
+
+test("threads link to their worktree and branch; repo-level matches don't add them", () => {
+  const main = realpathSync(mkdtempSync(join(tmpdir(), "plantrail-wt-")));
+  const wt = `${main}-feat`;
+  const git = (...args: string[]) => execFileSync("git", ["-C", main, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { stdio: "ignore" });
+  git("init", "-q", "-b", "main");
+  git("commit", "-q", "--allow-empty", "-m", "one");
+  git("worktree", "add", "-q", "-b", "feat", wt);
+  const db = openDb(":memory:");
+  const at = (cwd: string, session: string) => Object.assign(new Store(db, cwd), { session });
+  const kinds = (id: string) =>
+    db.prepare("SELECT kind, value FROM links WHERE thread_id = ? AND kind IN ('worktree','branch') ORDER BY kind, value").all(id).map((l) => ({ ...l }));
+  at(main, "s1").createThread("Main", "g");
+  assert.deepEqual(kinds("t1"), [
+    { kind: "branch", value: `${main}/.git#main` },
+    { kind: "worktree", value: main },
+  ]);
+  // Sole repo match from the worktree: bound, but not linked to the worktree.
+  assert.equal(at(wt, "s2").current().id, "t1");
+  assert.equal(kinds("t1").length, 2);
+  at(wt, "s3").createThread("Feat", "g");
+  assert.deepEqual(kinds("t2"), [
+    { kind: "branch", value: `${main}/.git#feat` },
+    { kind: "worktree", value: wt },
+  ]);
+  // Explicit bind from the worktree links it there.
+  at(wt, "s4").bind("t1");
+  assert.equal(kinds("t1").length, 4);
+  // Binding from an unrelated directory adds nothing.
+  const elsewhere = mkdtempSync(join(tmpdir(), "plantrail-else-"));
+  at(elsewhere, "s5").bind("t2");
+  assert.equal(kinds("t2").length, 2);
+});

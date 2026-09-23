@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { AUDITED, rowJson, type AuditedTable, type DB } from "./db.ts";
-import { headTime, locationKeys, unpushedCount, type LinkKey } from "./repo.ts";
+import { headTime, isRepoKey, locationKeys, unpushedCount, type LinkKey } from "./repo.ts";
 
 export const NODE_KINDS = ["task", "question", "finding", "decision"] as const;
 export const EDGE_TYPES = ["blocks", "derived_from", "contradicts"] as const;
@@ -252,7 +252,7 @@ export class Store {
       const added = locationKeys(this.cwd).filter((k) => !before.has(`${k.kind}\0${k.value}`));
       for (const k of added) this.addLink(t.id, k);
       const removed = prune
-        ? links().filter((l) => (l.kind === "repo" || l.kind === "dir") && isAbsolute(l.value) && !existsSync(l.value))
+        ? links().filter((l) => (isRepoKey(l) || l.kind === "worktree") && isAbsolute(l.value) && !existsSync(l.value))
         : [];
       const del = this.db.prepare("DELETE FROM links WHERE thread_id = ? AND kind = ? AND value = ?");
       for (const l of removed) del.run(t.id, l.kind, l.value);
@@ -265,7 +265,7 @@ export class Store {
     const t = threadId ? this.getThread(threadId) : this.current();
     const key = parseLink(spec);
     if (key.kind !== "url" && key.kind !== "ticket")
-      throw new PlantrailError(`Only url: and ticket: links can be added by hand; repo/dir links come from the current directory ('plantrail link'). Got '${spec}'`);
+      throw new PlantrailError(`Only url: and ticket: links can be added by hand; repo/dir/worktree/branch links come from the current directory ('plantrail link'). Got '${spec}'`);
     return this.tx(() => {
       const before = this.links(t.id).length;
       this.addLink(t.id, key);
@@ -328,7 +328,14 @@ export class Store {
   bind(threadId: string, sessionId = this.session): Thread {
     const t = this.getThread(threadId);
     if (t.status === "parked") this.setThreadStatus(t.id, "active");
-    this.bindInner(t.id, sessionId);
+    const keys = locationKeys(this.cwd);
+    this.tx(() => {
+      this.bindInner(t.id, sessionId);
+      // Binding a thread of this repo from a worktree/branch links it there so it resumes without asking.
+      const here = new Set(this.links(t.id).map((l) => `${l.kind}\0${l.value}`));
+      if (keys.some((k) => isRepoKey(k) && here.has(`${k.kind}\0${k.value}`)))
+        for (const k of keys) if (!isRepoKey(k)) this.addLink(t.id, k);
+    });
     return this.getThread(t.id);
   }
 
@@ -413,7 +420,7 @@ export class Store {
     const linked = this.threadsForLocation(keys);
     if (linked.length === 1) {
       this.bound = linked[0].id;
-      for (const k of keys) this.addLink(linked[0].id, k);
+      for (const k of keys) if (isRepoKey(k)) this.addLink(linked[0].id, k);
       return linked[0];
     }
     const hint = linked.length
@@ -1275,8 +1282,9 @@ export class Store {
     const linked = this.threadsForLocation(keys);
     if (linked.length === 1) {
       // Matched on some key (e.g. the origin URL after a move): add the others so
-      // this location keeps matching even if that key changes later.
-      for (const k of keys) this.addLink(linked[0].id, k);
+      // this location keeps matching even if that key changes later. Worktree/branch
+      // keys aren't added: a repo-level match doesn't say the thread belongs here.
+      for (const k of keys) if (isRepoKey(k)) this.addLink(linked[0].id, k);
       this.bindInner(linked[0].id, sessionId);
       return this.statusText(linked[0].id);
     }
@@ -1354,6 +1362,7 @@ function parseLink(spec: string): LinkKey {
   const i = spec.indexOf(":");
   if (i <= 0 || i === spec.length - 1) throw new PlantrailError(`Link must be kind:value (e.g. url:https://...), got '${spec}'`);
   const kind = spec.slice(0, i);
-  if (!["repo", "dir", "url", "ticket"].includes(kind)) throw new PlantrailError(`Link kind must be repo, dir, url or ticket, got '${kind}'`);
+  if (!["repo", "dir", "worktree", "branch", "url", "ticket"].includes(kind))
+    throw new PlantrailError(`Link kind must be repo, dir, worktree, branch, url or ticket, got '${kind}'`);
   return { kind, value: spec.slice(i + 1) } as LinkKey;
 }

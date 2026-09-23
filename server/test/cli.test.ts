@@ -143,7 +143,7 @@ test("cli: link attaches url:/ticket: links, rejects hand-made repo/dir links", 
   assert.doesNotMatch(ap(["link", "ticket:ABC-12"]).out, /Added/);
   assert.match(ap(["export", "--format", "md"]).out, /Links: .*ticket:ABC-12/);
   assert.match(ap(["link", "repo:/elsewhere"]).err, /Only url: and ticket:/);
-  assert.match(ap(["link", "bogus:x"]).err, /repo, dir, url or ticket/);
+  assert.match(ap(["link", "bogus:x"]).err, /repo, dir, worktree, branch, url or ticket/);
   assert.match(ap(["link", "url:"]).err, /kind:value/);
   assert.match(ap(["unlink", "ticket:ABC-12"]).out, /Removed: ticket:ABC-12/);
 });

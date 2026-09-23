@@ -59,10 +59,10 @@ export function rowJson(table: AuditedTable, r?: string): string {
  * Every recorded change lands in events under the open op (the Store's tx()
  * opens one per command); writes outside an op aren't recorded.
  */
-function eventTriggers(): string {
+function eventTriggers(tables = Object.keys(AUDITED) as AuditedTable[]): string {
   const op = "(SELECT id FROM ops WHERE open)";
   const out: string[] = [];
-  for (const table of Object.keys(AUDITED) as AuditedTable[]) {
+  for (const table of tables) {
     const { pk, cols, thread } = AUDITED[table];
     const key = (r: string) => `json_object(${pk.map((c) => `'${c}', ${r}.${c}`).join(", ")})`;
     const changed = cols.map((c) => `OLD.${c} IS NOT NEW.${c}`).join(" OR ");
@@ -183,6 +183,20 @@ const MIGRATIONS: string[] = [
   ALTER TABLE threads DROP COLUMN nudged_at;
   ALTER TABLE threads ADD COLUMN nudged_seq INTEGER;
   ${eventTriggers()}
+  `,
+  // Worktree/branch link kinds: widen the CHECK by rebuilding links (dropping it drops its triggers).
+  `
+  CREATE TABLE links_new (
+    thread_id TEXT NOT NULL REFERENCES threads(id),
+    kind TEXT NOT NULL CHECK (kind IN ('repo','dir','worktree','branch','url','ticket')),
+    value TEXT NOT NULL,
+    PRIMARY KEY (thread_id, kind, value)
+  );
+  INSERT INTO links_new SELECT thread_id, kind, value FROM links;
+  DROP TABLE links;
+  ALTER TABLE links_new RENAME TO links;
+  CREATE INDEX links_value ON links(kind, value);
+  ${eventTriggers(["links"])}
   `,
 ];
 
