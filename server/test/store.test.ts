@@ -415,6 +415,17 @@ test("log interleaves checkpoints and resolved nodes, newest first", () => {
   assert.ok(!log.some((e) => e.node?.id === c.id));
 });
 
+test("add rejects blocks cycles, direct or transitive, and rolls back", () => {
+  const { store, db } = setup();
+  const [a, b] = store.add([{ title: "a" }, { title: "b", blocked_by: ["#0"] }]);
+  assert.throws(() => store.add([{ title: "c", blocked_by: [a.id], blocks: [a.id] }]), /cycle/);
+  assert.throws(() => store.add([{ title: "c", blocked_by: [b.id], blocks: [a.id] }]), /cycle/);
+  assert.throws(() => store.add([{ title: "c", blocks: ["#1"] }, { title: "d", blocks: ["#0"] }]), /cycle/);
+  assert.equal(db.isTransaction, false);
+  assert.equal(store.search("c").length, 0);
+  assert.equal(store.add([{ title: "e", blocked_by: [a.id, a.id] }]).length, 1);
+});
+
 test("concurrent opens of a fresh db migrate once", async () => {
   const { spawn } = await import("node:child_process");
   const file = join(mkdtempSync(join(tmpdir(), "plantrail-test-")), "state.db");

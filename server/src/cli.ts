@@ -370,7 +370,9 @@ function main(argv = process.argv.slice(2)): number {
 try {
   process.exitCode = main();
 } catch (e) {
-  if (!(e instanceof PlantrailError) && !(e instanceof TypeError && "code" in e)) throw e;
-  console.error(e.message);
+  // SQLITE_BUSY (incl. extended codes): another process held the write lock past busy_timeout.
+  const busy = ((e as { errcode?: number }).errcode ?? 0) % 256 === 5;
+  if (!busy && !(e instanceof PlantrailError) && !(e instanceof TypeError && "code" in e)) throw e;
+  console.error(busy ? "The plantrail database is locked by another process; try again." : (e as Error).message);
   process.exitCode = 1;
 }

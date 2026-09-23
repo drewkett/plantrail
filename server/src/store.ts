@@ -111,6 +111,10 @@ export class Store {
     return `${prefix}${row.id}`;
   }
 
+  /**
+   * Run `fn` under BEGIN IMMEDIATE, which serializes writers across processes,
+   * so validation reads inside `fn` still hold when it writes.
+   */
   private tx<T>(fn: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -118,7 +122,10 @@ export class Store {
       this.db.exec("COMMIT");
       return out;
     } catch (e) {
-      this.db.exec("ROLLBACK");
+      // SQLite may already have rolled back (e.g. on SQLITE_FULL); don't let that mask `e`.
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {}
       throw e;
     }
   }
@@ -365,7 +372,7 @@ export class Store {
         `INSERT INTO nodes (id, thread_id, parent_id, kind, title, body, priority, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
-      const edge = this.db.prepare("INSERT OR IGNORE INTO edges (from_id, to_id, type) VALUES (?, ?, 'blocks')");
+      const edge = (from: string, to: string) => this.blockEdge(from, to);
       const deferred: [string, string][] = [];
       for (const it of items) {
         const id = this.nextId("n");
@@ -384,29 +391,25 @@ export class Store {
           now,
           now,
         );
-        for (const b of blockedBy) edge.run(b, id);
+        for (const b of blockedBy) edge(b, id);
         // `blocks` may point forward within the batch; resolve after all inserts.
         for (const b of it.blocks ?? []) deferred.push([id, b]);
       }
-      for (const [from, ref] of deferred) {
-        const to = resolve(ref);
-        if (to === from) throw new PlantrailError("A node cannot block itself");
-        edge.run(from, to);
-      }
+      for (const [from, ref] of deferred) edge(from, resolve(ref));
       this.touch(thread.id);
       return ids.map((id) => this.getNode(id));
     });
   }
 
   start(id: string): { node: Node; demoted: string[] } {
-    const node = this.getNode(id);
-    if (RESOLVED.includes(node.status)) throw new PlantrailError(`${id} is ${node.status}; reopen it with update first`);
-    const blockers = this.blockers(id);
-    if (blockers.length)
-      throw new PlantrailError(`${id} is blocked by ${blockers.map((b) => `${b.id} "${b.title}"`).join(", ")}`);
-    if (node.status === "blocked")
-      throw new PlantrailError(`${id} is marked blocked; update its status to open first`);
     return this.tx(() => {
+      const node = this.getNode(id);
+      if (RESOLVED.includes(node.status)) throw new PlantrailError(`${id} is ${node.status}; reopen it with update first`);
+      const blockers = this.blockers(id);
+      if (blockers.length)
+        throw new PlantrailError(`${id} is blocked by ${blockers.map((b) => `${b.id} "${b.title}"`).join(", ")}`);
+      if (node.status === "blocked")
+        throw new PlantrailError(`${id} is marked blocked; update its status to open first`);
       const now = this.ts();
       const demoted = (
         this.db
@@ -424,12 +427,18 @@ export class Store {
 
   done(id: string, summary: string, refs?: string[]): { node: Node; unblocked: Node[]; parentReady: Node | null } {
     if (!summary?.trim()) throw new PlantrailError("done requires a non-empty summary");
-    const node = this.getNode(id);
-    if (node.status === "done") throw new PlantrailError(`${id} is already done`);
+    return this.tx(() => {
+      const node = this.getNode(id);
+      if (node.status === "done") throw new PlantrailError(`${id} is already done`);
+      this.checkChildrenResolved(id);
+      return this.complete(node, summary.trim(), refs, this.ts());
+    });
+  }
+
+  private checkChildrenResolved(id: string): void {
     const open = this.children(id).filter((c) => !RESOLVED.includes(c.status));
     if (open.length)
       throw new PlantrailError(`${id} has unresolved children: ${open.map((c) => c.id).join(", ")}`);
-    return this.tx(() => this.complete(node, summary.trim(), refs, this.ts()));
   }
 
   private complete(node: Node, summary: string, refs: string[] | undefined, now: string) {
@@ -482,17 +491,15 @@ export class Store {
     if (!text?.trim()) throw new PlantrailError("A finding needs text");
     if (confidence !== undefined && !(confidence >= 0 && confidence <= 1))
       throw new PlantrailError("confidence must be between 0 and 1");
-    const parent = this.getNode(parentId);
-    if (parent.kind === "finding") throw new PlantrailError(`${parentId} is a finding; attach to the question it informs`);
-    if (answers) {
-      if (parent.kind !== "question") throw new PlantrailError(`${parentId} is a ${parent.kind}; only questions can be answered`);
-      if (RESOLVED.includes(parent.status)) throw new PlantrailError(`${parentId} is already ${parent.status}`);
-      const open = this.children(parentId).filter((c) => !RESOLVED.includes(c.status));
-      if (open.length)
-        throw new PlantrailError(`${parentId} has unresolved children: ${open.map((c) => c.id).join(", ")}`);
-    }
     const t = text.trim();
     return this.tx(() => {
+      const parent = this.getNode(parentId);
+      if (parent.kind === "finding") throw new PlantrailError(`${parentId} is a finding; attach to the question it informs`);
+      if (answers) {
+        if (parent.kind !== "question") throw new PlantrailError(`${parentId} is a ${parent.kind}; only questions can be answered`);
+        if (RESOLVED.includes(parent.status)) throw new PlantrailError(`${parentId} is already ${parent.status}`);
+        this.checkChildrenResolved(parentId);
+      }
       const id = this.nextId("n");
       const now = this.ts();
       this.db
@@ -542,12 +549,8 @@ export class Store {
       parent?: string | null;
     },
   ): { node: Node; unblocked: Node[] } {
-    const node = this.getNode(id);
-    if (fields.parent) this.checkMove(node, fields.parent);
     if (fields.status === "done")
       throw new PlantrailError("Use done(id, summary) to complete a node");
-    if (fields.status === "abandoned" && !(fields.summary ?? node.summary)?.trim())
-      throw new PlantrailError("Abandoning requires a summary explaining why");
     if (fields.status === "active") throw new PlantrailError("Use start(id) to activate a node");
     const sets: string[] = [];
     const vals: (string | number | null)[] = [];
@@ -563,6 +566,10 @@ export class Store {
     }
     if (!sets.length) throw new PlantrailError("No fields to update");
     return this.tx(() => {
+      const node = this.getNode(id);
+      if (fields.parent) this.checkMove(node, fields.parent);
+      if (fields.status === "abandoned" && !(fields.summary ?? node.summary)?.trim())
+        throw new PlantrailError("Abandoning requires a summary explaining why");
       const now = this.ts();
       this.db.prepare(`UPDATE nodes SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`).run(...vals, now, id);
       const unblocked = fields.status === "abandoned" ? this.releaseDependents(id, now) : [];
@@ -587,28 +594,38 @@ export class Store {
    * `answers` edges are managed by recordFinding.
    */
   addEdge(from: string, type: EdgeType, to: string): { from: Node; to: Node } {
-    const [a, b] = [this.getNode(from), this.getNode(to)];
-    if (a.id === b.id) throw new PlantrailError("A node cannot have an edge to itself");
-    if (type === "blocks") {
-      if (a.thread_id !== b.thread_id) throw new PlantrailError(`${to} belongs to thread ${b.thread_id}; blocks edges stay within a thread`);
-      const reach = this.db
-        .prepare(
-          `WITH RECURSIVE r(id) AS (SELECT ? UNION SELECT e.to_id FROM edges e JOIN r ON e.from_id = r.id WHERE e.type = 'blocks')
-           SELECT 1 FROM r WHERE id = ?`,
-        )
-        .get(b.id, a.id);
-      if (reach) throw new PlantrailError(`${to} already (transitively) blocks ${from}; that would be a cycle`);
-    }
-    const r = this.db.prepare("INSERT OR IGNORE INTO edges (from_id, to_id, type) VALUES (?, ?, ?)").run(a.id, b.id, type);
-    if (!r.changes) throw new PlantrailError(`${from} ${type} ${to} already exists`);
-    this.touch(a.thread_id);
-    return { from: a, to: this.getNode(b.id) };
+    return this.tx(() => {
+      const [a, b] = [this.getNode(from), this.getNode(to)];
+      if (a.id === b.id) throw new PlantrailError("A node cannot have an edge to itself");
+      if (type === "blocks" && a.thread_id !== b.thread_id)
+        throw new PlantrailError(`${to} belongs to thread ${b.thread_id}; blocks edges stay within a thread`);
+      const added =
+        type === "blocks"
+          ? this.blockEdge(a.id, b.id)
+          : this.db.prepare("INSERT OR IGNORE INTO edges (from_id, to_id, type) VALUES (?, ?, ?)").run(a.id, b.id, type).changes > 0;
+      if (!added) throw new PlantrailError(`${from} ${type} ${to} already exists`);
+      this.touch(a.thread_id);
+      return { from: a, to: this.getNode(b.id) };
+    });
+  }
+
+  /** Insert `from blocks to` unless it would form a cycle. Call inside tx(). Returns false if it already existed. */
+  private blockEdge(from: string, to: string): boolean {
+    if (from === to) throw new PlantrailError("A node cannot block itself");
+    const reach = this.db
+      .prepare(
+        `WITH RECURSIVE r(id) AS (SELECT ? UNION SELECT e.to_id FROM edges e JOIN r ON e.from_id = r.id WHERE e.type = 'blocks')
+         SELECT 1 FROM r WHERE id = ?`,
+      )
+      .get(to, from);
+    if (reach) throw new PlantrailError(`${to} already (transitively) blocks ${from}; that would be a cycle`);
+    return this.db.prepare("INSERT OR IGNORE INTO edges (from_id, to_id, type) VALUES (?, ?, 'blocks')").run(from, to).changes > 0;
   }
 
   /** Remove an edge. Removing the last open blocker reopens a `blocked` target. */
   removeEdge(from: string, type: EdgeType, to: string): { unblocked: Node[] } {
-    const a = this.getNode(from);
     return this.tx(() => {
+      const a = this.getNode(from);
       const r = this.db.prepare("DELETE FROM edges WHERE from_id = ? AND to_id = ? AND type = ?").run(from, to, type);
       if (!r.changes) throw new PlantrailError(`No edge ${from} ${type} ${to}`);
       const now = this.ts();
@@ -627,18 +644,18 @@ export class Store {
 
   /** Delete a mistaken node. Only leaves with no edges, so nothing else loses context. */
   deleteNode(id: string): Node {
-    const node = this.getNode(id);
-    const kids = this.children(id);
-    if (kids.length)
-      throw new PlantrailError(`${id} has children (${kids.map((c) => c.id).join(", ")}); move or delete them first, or abandon it`);
-    const edges = this.db
-      .prepare("SELECT from_id, to_id, type FROM edges WHERE from_id = ? OR to_id = ?")
-      .all(id, id) as { from_id: string; to_id: string; type: string }[];
-    if (edges.length)
-      throw new PlantrailError(
-        `${id} has edges (${edges.map((e) => `${e.from_id} ${e.type} ${e.to_id}`).join(", ")}); abandon it instead`,
-      );
     return this.tx(() => {
+      const node = this.getNode(id);
+      const kids = this.children(id);
+      if (kids.length)
+        throw new PlantrailError(`${id} has children (${kids.map((c) => c.id).join(", ")}); move or delete them first, or abandon it`);
+      const edges = this.db
+        .prepare("SELECT from_id, to_id, type FROM edges WHERE from_id = ? OR to_id = ?")
+        .all(id, id) as { from_id: string; to_id: string; type: string }[];
+      if (edges.length)
+        throw new PlantrailError(
+          `${id} has edges (${edges.map((e) => `${e.from_id} ${e.type} ${e.to_id}`).join(", ")}); abandon it instead`,
+        );
       this.db.prepare("DELETE FROM nodes WHERE id = ?").run(id);
       this.touch(node.thread_id);
       return node;
