@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,13 +10,13 @@ const CLI = join(import.meta.dirname, "../src/cli.ts");
 function setup() {
   const home = mkdtempSync(join(tmpdir(), "plantrail-home-"));
   const cwd = mkdtempSync(join(tmpdir(), "plantrail-cwd-"));
-  return (args: string[], input?: string, session?: string) => {
+  return Object.assign((args: string[], input?: string, session?: string) => {
     const env: NodeJS.ProcessEnv = { ...process.env, PLANTRAIL_HOME: home };
     delete env.CLAUDE_CODE_SESSION_ID;
     if (session) env.CLAUDE_CODE_SESSION_ID = session;
     const r = spawnSync("node", [CLI, "--cwd", cwd, ...args], { input, encoding: "utf8", env });
     return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim(), home };
-  };
+  }, { cwd });
 }
 
 test("cli: create, add via stdin, workflow rules, status", () => {
@@ -39,6 +39,22 @@ test("cli: create, add via stdin, workflow rules, status", () => {
   assert.match(ap(["update", "n1", "--status", "done"]).err, /--status must be one of open, blocked, abandoned \(use start\/done/);
   assert.match(ap(["edge", "n1", "follows", "n2"]).err, /TYPE must be one of blocks, derived_from, contradicts/);
   assert.match(ap(["edge", "n1"]).err, /Missing TYPE/);
+});
+
+test("cli: done --ref HEAD / --commit store the short SHA", () => {
+  const ap = setup();
+  ap(["create", "Demo", "--goal", "g"]);
+  ap(["add", "-"], JSON.stringify([{ title: "a" }, { title: "b" }]));
+  assert.match(ap(["done", "n1", "--summary", "s", "--commit"]).err, /HEAD doesn't resolve to a commit/);
+  const git = (...a: string[]) => execFileSync("git", ["-C", ap.cwd, ...a], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two");
+  const [head, prev] = [git("rev-parse", "--short", "HEAD"), git("rev-parse", "--short", "HEAD~1")];
+  assert.equal(ap(["done", "n1", "--summary", "s", "--commit", "--ref", "x.ts"]).code, 0);
+  assert.match(ap(["get", "n1"]).out, new RegExp(`Refs: x\\.ts, ${head}\\b`));
+  ap(["done", "n2", "--summary", "s", "--ref", "HEAD~1"]);
+  assert.match(ap(["get", "n2"]).out, new RegExp(`Refs: ${prev}\\b`));
 });
 
 test("cli: bad input exits 1/2 without a stack trace", () => {

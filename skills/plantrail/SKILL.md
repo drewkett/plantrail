@@ -29,7 +29,7 @@ Run it via Bash as `~/.plantrail/bin/plantrail <command>` (the SessionStart hook
    ```
    Single item: `plantrail add "Title" [--kind question] [--parent n3] [--blocks n4,n5] [--priority 1]`. Use priority (higher = sooner) sparingly.
 3. `plantrail start nN` before working on a node. Only one node is active per thread.
-4. `plantrail done nN --summary "..." --ref path/file.ts --ref <commit>` when finished. The summary is the durable record: what was done or learned and any gotchas, specific enough that nobody has to re-derive it.
+4. `plantrail done nN --summary "..." --ref path/file.ts --commit` when finished (`--commit` records HEAD's short SHA; `--ref HEAD~1` works too). The summary is the durable record: what was done or learned and any gotchas, specific enough that nobody has to re-derive it.
 5. `plantrail next` (`-n 5` for more; `--all` ranks across every active thread) to choose what comes next.
 
 ## Other rules

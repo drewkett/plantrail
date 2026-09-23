@@ -42,3 +42,8 @@ export function unpushedCount(cwd: string): number | null {
   const n = git(cwd, ["rev-list", "--count", "@{upstream}..HEAD"]);
   return n === null ? null : Number(n);
 }
+
+/** Short SHA for a HEAD-relative revision (HEAD, HEAD~2, HEAD^), or null if it doesn't resolve. */
+export function shortSha(cwd: string, rev: string): string | null {
+  return git(cwd, ["rev-parse", "--short", "--verify", "--end-of-options", `${rev}^{commit}`]);
+}

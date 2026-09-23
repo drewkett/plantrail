@@ -6,6 +6,7 @@ import { plantrailHome, openDb } from "./db.ts";
 import { exportHtml } from "./html.ts";
 import { serve } from "./serve.ts";
 import * as fmt from "./format.ts";
+import { shortSha } from "./repo.ts";
 import { EDGE_TYPES, NODE_KINDS, PlantrailError, Store, type AddItem, type EdgeType, type NodeKind, type NodeStatus } from "./store.ts";
 
 const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
@@ -26,7 +27,9 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
                                            ({title, kind?, parent?, body?, priority?, blocks?, blocked_by?};
                                             "#i" refers to the i-th item of the same array; #1 is the first)
   start ID                                 mark active (refuses if blocked)
-  done ID --summary S [--ref R]...         complete; summary required
+  done ID --summary S [--ref R]... [--commit]
+                                           complete; summary required. --ref HEAD (or HEAD~N)
+                                           is stored as its short SHA; --commit adds HEAD's
   finding ID TEXT [--confidence 0..1] [--source S]... [--answers]
                                            record a finding under question/node ID
                                            (--answers: also close question ID with it)
@@ -146,6 +149,7 @@ function main(argv = process.argv.slice(2)): number {
       "blocked-by": { type: "string" },
       summary: { type: "string" },
       ref: { type: "string", multiple: true },
+      commit: { type: "boolean" },
       confidence: { type: "string" },
       source: { type: "string", multiple: true },
       title: { type: "string" },
@@ -276,7 +280,13 @@ function main(argv = process.argv.slice(2)): number {
       return 0;
     }
     case "done": {
-      out(fmt.formatDone(store.done(need(arg, "ID"), need(v.summary, "--summary"), v.ref), doneHint));
+      const refs = [...(v.ref ?? []), ...(v.commit ? ["HEAD"] : [])].map((r) => {
+        if (!/^HEAD([~^]\d*)*$/.test(r)) return r;
+        const sha = shortSha(store.cwd, r);
+        if (!sha) throw new PlantrailError(`${r} doesn't resolve to a commit in ${store.cwd}`);
+        return sha;
+      });
+      out(fmt.formatDone(store.done(need(arg, "ID"), need(v.summary, "--summary"), refs.length ? refs : undefined), doneHint));
       return 0;
     }
     case "finding": {
