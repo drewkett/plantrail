@@ -246,6 +246,22 @@ test("nextOptions favors unexplored and low-confidence questions", () => {
   assert.match(opts[1].why, /low confidence 0\.2/);
 });
 
+test("contradicting findings mark a question contested in next and status", () => {
+  const { store } = setup();
+  const [task, q] = store.add([{ title: "task" }, { title: "q", kind: "question" }]);
+  const a = store.recordFinding(q.id, "yes", 0.9).node;
+  const b = store.recordFinding(q.id, "no", 0.9).node;
+  assert.deepEqual(store.nextOptions(2).map((o) => o.node.id), [task.id, q.id]);
+  assert.doesNotMatch(store.statusText(), /Contradictions/);
+  store.addEdge(b.id, "contradicts", a.id);
+  const opts = store.nextOptions(2);
+  assert.deepEqual(opts.map((o) => o.node.id), [q.id, task.id]);
+  assert.match(opts[0].why, new RegExp(`contested ${b.id}⟂${a.id}`));
+  assert.match(store.statusText(), new RegExp(`Contradictions:\\n  ${b.id} \\(finding\\) no ⟂ ${a.id} \\(finding\\) yes`));
+  store.done(q.id, "settled: yes");
+  assert.doesNotMatch(store.statusText(), /Contradictions/);
+});
+
 test("search ranks title hits, matches prefixes/phrases, and scopes to thread", () => {
   const { store } = setup();
   const [a, b] = store.add([

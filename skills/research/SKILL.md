@@ -24,7 +24,7 @@ Research in plantrail is a tree of **questions** answered by **findings**. Each 
 
 ## Loop
 
-1. `plantrail next` picks the question to work on. It ranks unexplored and low-confidence questions higher, so follow it unless you have a reason not to. `plantrail start nN`.
+1. `plantrail next` picks the question to work on. It ranks unexplored, low-confidence, and contested questions higher, so follow it unless you have a reason not to. `plantrail start nN`.
 2. Investigate (docs, code, experiments, web). Record each useful fact as you get it, not in a batch at the end:
    ```sh
    ~/.plantrail/bin/plantrail finding nN "X sustains ~40k msg/s on one node with acks=all" \
@@ -33,7 +33,7 @@ Research in plantrail is a tree of **questions** answered by **findings**. Each 
    - One claim per finding. Say what the claim rests on in the text if it isn't obvious from the sources.
    - Confidence: ~0.9+ verified directly (ran it, read the source); ~0.7 reputable docs; ~0.5 single secondary source or inference; below that, a lead. Don't inflate it.
    - Always give sources (URL, file path, commit, command). A finding without sources should get low confidence.
-   - Findings that contradict earlier ones are expected; record them and lower your confidence in the overall answer.
+   - Findings that contradict earlier ones are expected; record them, link them with `plantrail edge nNEW contradicts nOLD`, and lower your confidence in the overall answer. `status` lists contradictions until the question is closed.
 3. When the evidence settles the question, record the conclusion with `--answers` to close it:
    `plantrail finding nN "Use X: meets throughput, Y lacks exactly-once" --confidence 0.8 --source ... --answers`
 4. New questions come up → `add` them (`--kind question --parent nN`). A dead-end question → `plantrail update nN --status abandoned --summary "why"`.

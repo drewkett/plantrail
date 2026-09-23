@@ -62,11 +62,12 @@ export interface Option {
   thread_title?: string;
 }
 
-/** A thread's nodes, children by parent id, and open blocker ids by node id. */
+/** A thread's nodes, children by parent id, open blocker ids by node id, and contradicts edges touching it. */
 interface Graph {
   nodes: Map<string, Node>;
   kids: Map<string, Node[]>;
   blockers: Map<string, string[]>;
+  contradicts: { from_id: string; to_id: string }[];
 }
 
 const byScore = (a: Option, b: Option) =>
@@ -693,8 +694,9 @@ export class Store {
    * Rank open, unblocked tasks/questions. Leaves beat containers, explicit
    * priority dominates, deeper (more concrete) nodes get a small boost, and
    * nodes untouched for a while float up so nothing rots. Questions with no
-   * findings (unexplored) or only low-confidence ones get a boost so research
-   * goes where the uncertainty is.
+   * findings (unexplored), only low-confidence ones, or a pair of findings
+   * that contradict each other (contested) get a boost so research goes where
+   * the uncertainty is.
    */
   nextOptions(n = 3, threadId?: string): Option[] {
     return this.rank(this.graph(threadId ?? this.current().id), n);
@@ -722,7 +724,10 @@ export class Store {
         const findings = kids.filter((c) => c.kind === "finding");
         const confs = findings.map((f) => f.confidence).filter((c) => c != null);
         const best = confs.length ? Math.max(...confs) : null;
+        const ids = new Set(findings.map((f) => f.id));
+        const contested = g.contradicts.find((e) => ids.has(e.from_id) && ids.has(e.to_id));
         if (!findings.length) [research, researchWhy] = [3, "unexplored"];
+        else if (contested) [research, researchWhy] = [3, `contested ${contested.from_id}⟂${contested.to_id}`];
         else if (best == null || best < 0.7) {
           research = 3 * (1 - (best ?? 0.5));
           researchWhy = `low confidence ${best ?? "unrated"}`;
@@ -744,8 +749,9 @@ export class Store {
   }
 
   /**
-   * A thread's nodes, children by parent, and open blockers by node, loaded in
-   * two queries so ranking doesn't query per candidate.
+   * A thread's nodes, children by parent, open blockers by node, and
+   * contradicts edges, loaded in three queries so ranking doesn't query per
+   * candidate.
    */
   private graph(threadId: string): Graph {
     const rows = this.db
@@ -762,7 +768,13 @@ export class Store {
       )
       .all(threadId) as { from_id: string; to_id: string }[];
     for (const e of edges) blockers.set(e.to_id, [...(blockers.get(e.to_id) ?? []), e.from_id]);
-    return { nodes, kids, blockers };
+    const contradicts = this.db
+      .prepare(
+        `SELECT e.from_id, e.to_id FROM edges e JOIN nodes a ON a.id = e.from_id JOIN nodes b ON b.id = e.to_id
+         WHERE (a.thread_id = ? OR b.thread_id = ?) AND e.type = 'contradicts' ORDER BY e.rowid`,
+      )
+      .all(threadId, threadId) as { from_id: string; to_id: string }[];
+    return { nodes, kids, blockers, contradicts };
   }
 
   /** nextOptions merged across every active thread, each tagged with its thread title. */
@@ -905,6 +917,20 @@ export class Store {
         lines.push(`  ${fmt(b)}${by.length ? ` ← ${by.join(", ")}` : ""}`);
       }
       if (blocked.length > 5) lines.push(`  …${blocked.length - 5} more`);
+    }
+    // Contradictions stay listed until the question they sit under is resolved.
+    const unsettled = (id: string) => {
+      const n = g.nodes.get(id);
+      if (!n) return false;
+      const p = n.parent_id ? g.nodes.get(n.parent_id) : undefined;
+      return n.status !== "abandoned" && !(p && RESOLVED.includes(p.status));
+    };
+    const contra = g.contradicts.filter((e) => unsettled(e.from_id) || unsettled(e.to_id));
+    if (contra.length) {
+      lines.push("Contradictions:");
+      const side = (id: string) => (g.nodes.has(id) ? fmt(g.nodes.get(id)!) : `${id} [other thread]`);
+      for (const e of contra.slice(0, 5)) lines.push(`  ${side(e.from_id)} ⟂ ${side(e.to_id)}`);
+      if (contra.length > 5) lines.push(`  …${contra.length - 5} more`);
     }
     const rel = this.related(t.id);
     if (rel.length) {
