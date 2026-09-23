@@ -362,7 +362,8 @@ test("stop hook nudges once per batch of changes; precompact auto-checkpoints", 
   const [a] = store.add([{ title: "a" }]);
   clock.advance(1000);
   store.start(a.id);
-  assert.match(store.stopNudge() ?? "", /1 node\(s\) changed since the last checkpoint: n1 \(active\)/);
+  const nudge = store.stopNudge() ?? "";
+  assert.match(nudge, /1 node\(s\) changed since the last checkpoint: n1 \(active\)\. Still active: n1 a; if finished: `~\/\.plantrail\/bin\/plantrail done n1 --summary "<what changed, where>"`\. Before/);
   clock.advance(1000);
   assert.equal(store.stopNudge(), null); // already nudged, nothing new
   clock.advance(1000);
@@ -378,23 +379,32 @@ test("stop hook nudges once per batch of changes; precompact auto-checkpoints", 
   assert.equal(store.stopNudge(), null);
 });
 
-test("stop nudge mentions unpushed commits", () => {
+test("stop nudge mentions unpushed commits and suggests --commit after new commits", () => {
   const { store, clock, dir } = setup();
   const git = (...args: string[]) => execFileSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { stdio: "ignore" });
   const remote = mkdtempSync(join(tmpdir(), "plantrail-remote-"));
   execFileSync("git", ["init", "-q", "--bare", remote]);
   git("init", "-q");
-  git("commit", "-q", "--allow-empty", "-m", "one");
+  process.env.GIT_COMMITTER_DATE = "2025-06-01T00:00:00Z"; // before the test clock's 2026-01-01
+  try {
+    git("commit", "-q", "--allow-empty", "-m", "one");
+  } finally {
+    delete process.env.GIT_COMMITTER_DATE;
+  }
   git("remote", "add", "origin", remote);
   git("push", "-q", "-u", "origin", "HEAD");
   const [a] = store.add([{ title: "a" }]);
   clock.advance(1000);
   store.start(a.id);
-  assert.doesNotMatch(store.stopNudge() ?? "", /unpushed|aren't pushed/);
+  const before = store.stopNudge() ?? "";
+  assert.doesNotMatch(before, /unpushed|aren't pushed|--commit/);
+  assert.match(before, /done n1 --summary "<what changed, where>"`/);
   git("commit", "-q", "--allow-empty", "-m", "two");
   clock.advance(1000);
-  store.done(a.id, "did a");
-  assert.match(store.stopNudge() ?? "", /1 commit\(s\) on this branch aren't pushed/);
+  store.add([{ title: "found more work" }]);
+  const after = store.stopNudge() ?? "";
+  assert.match(after, /1 commit\(s\) on this branch aren't pushed/);
+  assert.match(after, /done n1 --summary "<what changed, where>" --commit`/);
 });
 
 test("resume auto-parks idle threads; bind reactivates; status flags long-active nodes", () => {

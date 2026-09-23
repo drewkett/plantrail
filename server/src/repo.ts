@@ -47,3 +47,9 @@ export function unpushedCount(cwd: string): number | null {
 export function shortSha(cwd: string, rev: string): string | null {
   return git(cwd, ["rev-parse", "--short", "--verify", "--end-of-options", `${rev}^{commit}`]);
 }
+
+/** Commit time of HEAD in ms, or null outside git / on an unborn branch. */
+export function headTime(cwd: string): number | null {
+  const t = git(cwd, ["log", "-1", "--format=%cI"]);
+  return t === null ? null : Date.parse(t);
+}

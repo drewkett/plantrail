@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { AUDITED, rowJson, type AuditedTable, type DB } from "./db.ts";
-import { locationKeys, unpushedCount, type LinkKey } from "./repo.ts";
+import { headTime, locationKeys, unpushedCount, type LinkKey } from "./repo.ts";
 
 export const NODE_KINDS = ["task", "question", "finding", "decision"] as const;
 export const EDGE_TYPES = ["blocks", "derived_from", "contradicts"] as const;
@@ -1217,9 +1217,20 @@ export class Store {
     this.db.prepare("UPDATE threads SET nudged_seq = (SELECT max(seq) FROM events) WHERE id = ?").run(t.id);
     const list = changed.slice(0, 5).map((n) => `${n.id} (${n.status})`).join(", ");
     const unpushed = unpushedCount(this.cwd);
+    const active = this.db
+      .prepare("SELECT * FROM nodes WHERE thread_id = ? AND status = 'active' ORDER BY updated_at")
+      .all(t.id) as unknown as Node[];
+    // Suggest --commit when HEAD was committed after the node was last touched (i.e. during its work).
+    const head = active.length ? headTime(this.cwd) : null;
+    const doneCmd = (n: Node) =>
+      `\`~/.plantrail/bin/plantrail done ${n.id} --summary "<what changed, where>"${head != null && head > Date.parse(n.updated_at) ? " --commit" : ""}\``;
+    const activeNote = active.length
+      ? ` Still active: ${active.slice(0, 3).map((n) => `${fmt(n)}; if finished: ${doneCmd(n)}`).join(". ")}${active.length > 3 ? ` (+${active.length - 3} more)` : ""}.`
+      : "";
     return (
-      `[plantrail] ${t.id}: ${changed.length} node(s) changed since the last checkpoint: ${list}${changed.length > 5 ? ", …" : ""}. ` +
-      "Before stopping: mark finished nodes done with a summary, add any new work you found, and run " +
+      `[plantrail] ${t.id}: ${changed.length} node(s) changed since the last checkpoint: ${list}${changed.length > 5 ? ", …" : ""}.` +
+      activeNote +
+      " Before stopping: mark finished nodes done with a summary, add any new work you found, and run " +
       "`plantrail checkpoint \"<state, next step, gotchas>\"`. If that's already covered, just stop." +
       (unpushed ? ` Note: ${unpushed} commit(s) on this branch aren't pushed; say so in the checkpoint.` : "")
     );
