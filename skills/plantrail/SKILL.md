@@ -18,7 +18,7 @@ Run it via Bash as `~/.plantrail/bin/plantrail <command>` (the SessionStart hook
 ## Working loop
 
 1. `plantrail status` when you need orientation (~300 tokens). Don't re-read big plan docs to find out what's next.
-2. Break work down in one call with a JSON array on stdin; `#i` references the i-th item of the same array (`parent`/`blocked_by` must point to earlier items, `blocks` may point forward):
+2. Break work down in one call with a JSON array on stdin; `#i` references item i of the same array, counting from 0 (`#0` is the first item, unlike node ids, which start at n1); `parent`/`blocked_by` must point to earlier items, and `blocks` may point forward:
    ```sh
    ~/.plantrail/bin/plantrail add - <<'JSON'
    [{"title": "Design schema", "priority": 2},

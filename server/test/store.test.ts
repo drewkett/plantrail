@@ -82,6 +82,8 @@ test("add rejects forward refs for parent and cross-thread ids", () => {
   assert.throws(() => store.add([{ title: "a", parent: "#1" }, { title: "b" }]), /earlier item/);
   assert.throws(() => store.add([{ title: "a", parent: "#0" }]), /earlier item/);
   assert.throws(() => store.add([{ title: "a", blocked_by: ["#0"] }]), /earlier item/);
+  assert.throws(() => store.add([{ title: "a", blocks: ["#1"] }]), /#1 is out of range: this call has 1 item\(s\), #0\.\.#0/);
+  assert.throws(() => store.add([{ title: "a" }, { title: "b", parent: "#2" }]), /out of range.*#0 is the first/);
   assert.throws(() => store.add([{ title: "a", blocks: ["#0"] }]), /cannot block itself/);
   const [x] = store.add([{ title: "x" }]);
   store.createThread("Other", "g", false);

@@ -386,9 +386,13 @@ export class Store {
       const resolve = (ref: string): string => {
         const m = /^#(\d+)$/.exec(ref);
         if (m) {
-          const id = ids[Number(m[1])];
-          if (!id) throw new PlantrailError(`Reference ${ref} must point to an earlier item in this call`);
-          return id;
+          const i = Number(m[1]);
+          const id = ids[i];
+          if (id) return id;
+          // `#i` is 0-based: #0 is the first item. Easy to mistake for 1-based, so say so.
+          if (i >= items.length)
+            throw new PlantrailError(`Reference ${ref} is out of range: this call has ${items.length} item(s), #0..#${items.length - 1} (#0 is the first)`);
+          throw new PlantrailError(`Reference ${ref} in parent/blocked_by must point to an earlier item in this call (#0 is the first); use blocks for forward edges`);
         }
         const n = this.getNode(ref);
         if (n.thread_id !== thread.id) throw new PlantrailError(`${ref} belongs to thread ${n.thread_id}`);
