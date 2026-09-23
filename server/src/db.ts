@@ -23,6 +23,60 @@ export function moveLegacyHome(legacy: string, home: string): void {
   }
 }
 
+/**
+ * Tables whose row changes the events migration records: primary key, the
+ * columns captured as JSON, and how to find the row's thread. Threads record
+ * only their user-facing columns (touched_at/nudged_seq are bookkeeping). A
+ * migration that adds a column to one of these must recreate its triggers.
+ */
+export const AUDITED = {
+  nodes: {
+    pk: ["id"],
+    cols: ["id", "thread_id", "parent_id", "kind", "title", "status", "summary", "body", "refs", "priority", "confidence", "created_at", "updated_at"],
+    thread: (r: string) => `${r}.thread_id`,
+  },
+  edges: {
+    pk: ["from_id", "to_id", "type"],
+    cols: ["from_id", "to_id", "type"],
+    thread: (r: string) => `(SELECT thread_id FROM nodes WHERE id = ${r}.from_id)`,
+  },
+  links: { pk: ["thread_id", "kind", "value"], cols: ["thread_id", "kind", "value"], thread: (r: string) => `${r}.thread_id` },
+  checkpoints: {
+    pk: ["id"],
+    cols: ["id", "thread_id", "note", "frontier_json", "created_at"],
+    thread: (r: string) => `${r}.thread_id`,
+  },
+  threads: { pk: ["id"], cols: ["id", "title", "goal", "status", "created_at"], thread: (r: string) => `${r}.id` },
+} as const;
+export type AuditedTable = keyof typeof AUDITED;
+
+/** `json_object(...)` over an audited table's columns, read from `r` (a row alias, NEW or OLD). */
+export function rowJson(table: AuditedTable, r?: string): string {
+  return `json_object(${AUDITED[table].cols.map((c) => `'${c}', ${r ? `${r}.` : ""}${c}`).join(", ")})`;
+}
+
+/**
+ * Every recorded change lands in events under the open op (the Store's tx()
+ * opens one per command); writes outside an op aren't recorded.
+ */
+function eventTriggers(): string {
+  const op = "(SELECT id FROM ops WHERE open)";
+  const out: string[] = [];
+  for (const table of Object.keys(AUDITED) as AuditedTable[]) {
+    const { pk, cols, thread } = AUDITED[table];
+    const key = (r: string) => `json_object(${pk.map((c) => `'${c}', ${r}.${c}`).join(", ")})`;
+    const changed = cols.map((c) => `OLD.${c} IS NOT NEW.${c}`).join(" OR ");
+    const ev = (action: string, r: string, oldJ: string, newJ: string) =>
+      `INSERT INTO events (op_id, thread_id, tbl, action, row_key, old, new) VALUES (${op}, ${thread(r)}, '${table}', '${action}', ${key(r)}, ${oldJ}, ${newJ});`;
+    out.push(
+      `CREATE TRIGGER ${table}_ev_i AFTER INSERT ON ${table} WHEN EXISTS ${op} BEGIN ${ev("insert", "NEW", "NULL", rowJson(table, "NEW"))} END;`,
+      `CREATE TRIGGER ${table}_ev_u AFTER UPDATE ON ${table} WHEN EXISTS ${op} AND (${changed}) BEGIN ${ev("update", "NEW", rowJson(table, "OLD"), rowJson(table, "NEW"))} END;`,
+      `CREATE TRIGGER ${table}_ev_d AFTER DELETE ON ${table} WHEN EXISTS ${op} BEGIN ${ev("delete", "OLD", rowJson(table, "OLD"), "NULL")} END;`,
+    );
+  }
+  return out.join("\n");
+}
+
 /** Ordered migrations; index + 1 is the schema version stored in PRAGMA user_version. */
 const MIGRATIONS: string[] = [
   `
@@ -101,6 +155,35 @@ const MIGRATIONS: string[] = [
   `,
   `ALTER TABLE nodes ADD COLUMN confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1));`,
   `ALTER TABLE threads ADD COLUMN nudged_at TEXT;`,
+  `
+  CREATE TABLE ops (
+    id INTEGER PRIMARY KEY,
+    thread_id TEXT,
+    label TEXT,
+    session_id TEXT,
+    at TEXT NOT NULL,
+    open INTEGER NOT NULL DEFAULT 1,
+    undoes INTEGER REFERENCES ops(id),
+    undone_by INTEGER REFERENCES ops(id)
+  );
+  CREATE INDEX ops_open ON ops(id) WHERE open;
+  CREATE INDEX ops_thread ON ops(thread_id, id);
+  CREATE TABLE events (
+    seq INTEGER PRIMARY KEY,
+    op_id INTEGER NOT NULL REFERENCES ops(id),
+    thread_id TEXT,
+    tbl TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('insert','update','delete')),
+    row_key TEXT NOT NULL,
+    old TEXT,
+    new TEXT
+  );
+  CREATE INDEX events_op ON events(op_id);
+  CREATE INDEX events_thread ON events(thread_id, tbl, seq);
+  ALTER TABLE threads DROP COLUMN nudged_at;
+  ALTER TABLE threads ADD COLUMN nudged_seq INTEGER;
+  ${eventTriggers()}
+  `,
 ];
 
 export function openDb(path?: string): DB {

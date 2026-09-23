@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import type { DB } from "./db.ts";
+import { AUDITED, rowJson, type AuditedTable, type DB } from "./db.ts";
 import { locationKeys, unpushedCount, type LinkKey } from "./repo.ts";
 
 export const NODE_KINDS = ["task", "question", "finding", "decision"] as const;
@@ -18,8 +18,29 @@ export interface Thread {
   status: ThreadStatus;
   created_at: string;
   touched_at: string;
-  /** When the Stop hook last reminded about uncheckpointed changes. */
-  nudged_at?: string | null;
+  /** Last event seq when the Stop hook reminded about uncheckpointed changes. */
+  nudged_seq?: number | null;
+}
+
+/** One recorded command: its row changes, described, newest op first in history(). */
+export interface OpEntry {
+  id: number;
+  at: string;
+  label: string | null;
+  /** Set on an undo op: the op it reverted. */
+  undoes: number | null;
+  /** Set on a reverted op: the undo that reverted it. */
+  undone_by: number | null;
+  changes: string[];
+}
+
+interface EventRow {
+  seq: number;
+  tbl: AuditedTable;
+  action: "insert" | "update" | "delete";
+  row_key: string;
+  old: string | null;
+  new: string | null;
 }
 
 export type LogEntry = { at: string; checkpoint: string; node?: undefined } | { at: string; node: Node; checkpoint?: undefined };
@@ -107,6 +128,8 @@ export class Store {
   bound: string | null = null;
   /** Claude session this process runs in (hook payload or $CLAUDE_CODE_SESSION_ID), if known. */
   session: string | null = null;
+  /** Recorded on each op, e.g. the CLI command line. */
+  label: string | null = null;
 
   readonly db: DB;
   readonly cwd: string;
@@ -133,12 +156,21 @@ export class Store {
 
   /**
    * Run `fn` under BEGIN IMMEDIATE, which serializes writers across processes,
-   * so validation reads inside `fn` still hold when it writes.
+   * so validation reads inside `fn` still hold when it writes. `fn` runs as one
+   * op: triggers record its row changes as events (see db.ts AUDITED).
    */
   private tx<T>(fn: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      const op = Number(
+        this.db.prepare("INSERT INTO ops (label, session_id, at) VALUES (?, ?, ?)").run(this.label, this.session, this.ts()).lastInsertRowid,
+      );
       const out = fn();
+      const first = this.db.prepare("SELECT thread_id FROM events WHERE op_id = ? ORDER BY seq LIMIT 1").get(op) as
+        | { thread_id: string | null }
+        | undefined;
+      if (first) this.db.prepare("UPDATE ops SET open = 0, thread_id = ? WHERE id = ?").run(first.thread_id, op);
+      else this.db.prepare("DELETE FROM ops WHERE id = ?").run(op);
       this.db.exec("COMMIT");
       return out;
     } catch (e) {
@@ -232,19 +264,23 @@ export class Store {
     const key = parseLink(spec);
     if (key.kind !== "url" && key.kind !== "ticket")
       throw new PlantrailError(`Only url: and ticket: links can be added by hand; repo/dir links come from the current directory ('plantrail link'). Got '${spec}'`);
-    const before = this.links(t.id).length;
-    this.addLink(t.id, key);
-    const links = this.links(t.id);
-    return { added: links.length > before ? [key] : [], removed: [], links };
+    return this.tx(() => {
+      const before = this.links(t.id).length;
+      this.addLink(t.id, key);
+      const links = this.links(t.id);
+      return { added: links.length > before ? [key] : [], removed: [], links };
+    });
   }
 
   /** Remove one link, given as `kind:value` exactly as `link` prints it. */
   unlink(threadId: string | undefined, spec: string): { removed: LinkKey; links: LinkKey[] } {
     const t = threadId ? this.getThread(threadId) : this.current();
     const removed = parseLink(spec);
-    const r = this.db.prepare("DELETE FROM links WHERE thread_id = ? AND kind = ? AND value = ?").run(t.id, removed.kind, removed.value);
-    if (!r.changes) throw new PlantrailError(`${t.id} has no link ${spec}`);
-    return { removed, links: this.links(t.id) };
+    return this.tx(() => {
+      const r = this.db.prepare("DELETE FROM links WHERE thread_id = ? AND kind = ? AND value = ?").run(t.id, removed.kind, removed.value);
+      if (!r.changes) throw new PlantrailError(`${t.id} has no link ${spec}`);
+      return { removed, links: this.links(t.id) };
+    });
   }
 
   listThreads(filter: "active" | "parked" | "done" | "all" = "active"): Thread[] {
@@ -296,8 +332,10 @@ export class Store {
 
   setThreadStatus(threadId: string, status: ThreadStatus): Thread {
     this.getThread(threadId);
-    this.db.prepare("UPDATE threads SET status = ?, touched_at = ? WHERE id = ?").run(status, this.ts(), threadId);
-    return this.getThread(threadId);
+    return this.tx(() => {
+      this.db.prepare("UPDATE threads SET status = ?, touched_at = ? WHERE id = ?").run(status, this.ts(), threadId);
+      return this.getThread(threadId);
+    });
   }
 
   /** Mark a thread done so it stops auto-resuming. Returns it with the count of still-open nodes. */
@@ -322,10 +360,12 @@ export class Store {
     if (title === undefined && goal === undefined) throw new PlantrailError("Nothing to change: give a title and/or goal");
     if (title !== undefined && !title.trim()) throw new PlantrailError("Title must not be empty");
     const t = this.getThread(threadId);
-    this.db
-      .prepare("UPDATE threads SET title = ?, goal = ?, touched_at = ? WHERE id = ?")
-      .run(title?.trim() ?? t.title, goal?.trim() ?? t.goal, this.ts(), threadId);
-    return this.getThread(threadId);
+    return this.tx(() => {
+      this.db
+        .prepare("UPDATE threads SET title = ?, goal = ?, touched_at = ? WHERE id = ?")
+        .run(title?.trim() ?? t.title, goal?.trim() ?? t.goal, this.ts(), threadId);
+      return this.getThread(threadId);
+    });
   }
 
   /** Park active threads untouched for `days`. Returns the parked threads. */
@@ -848,11 +888,13 @@ export class Store {
       active: active.map((a) => a.id),
       next: this.nextOptions(5, t.id).map((o) => o.node.id),
     };
-    const r = this.db
-      .prepare("INSERT INTO checkpoints (thread_id, note, frontier_json, created_at) VALUES (?, ?, ?, ?)")
-      .run(t.id, note.trim(), JSON.stringify(frontier), this.ts());
-    this.touch(t.id);
-    return { id: Number(r.lastInsertRowid) };
+    return this.tx(() => {
+      const r = this.db
+        .prepare("INSERT INTO checkpoints (thread_id, note, frontier_json, created_at) VALUES (?, ?, ?, ?)")
+        .run(t.id, note.trim(), JSON.stringify(frontier), this.ts());
+      this.touch(t.id);
+      return { id: Number(r.lastInsertRowid) };
+    });
   }
 
   /**
@@ -979,6 +1021,75 @@ export class Store {
     return lines.join("\n");
   }
 
+  // ---------- history & undo ----------
+
+  /** Recorded ops touching a thread (default: bound), newest first, with their changes described. */
+  history(n = 10, threadId?: string): OpEntry[] {
+    const t = threadId ? this.getThread(threadId) : this.current();
+    const ops = this.db
+      .prepare("SELECT id, at, label, undoes, undone_by FROM ops WHERE thread_id = ? AND NOT open ORDER BY id DESC LIMIT ?")
+      .all(t.id, n) as unknown as Omit<OpEntry, "changes">[];
+    return ops.map((o) => ({ ...o, changes: this.opEvents(o.id).map(describeEvent) }));
+  }
+
+  private opEvents(opId: number, newestFirst = false): EventRow[] {
+    return this.db
+      .prepare(`SELECT seq, tbl, action, row_key, old, new FROM events WHERE op_id = ? ORDER BY seq ${newestFirst ? "DESC" : ""}`)
+      .all(opId) as unknown as EventRow[];
+  }
+
+  /**
+   * Revert the latest op on the bound thread that isn't an undo or already
+   * undone, so repeated undos walk back. Refuses if any row it touched has
+   * changed since (e.g. by a later, unrecorded write) or if it created a thread.
+   * With `dryRun`, only reports what would be reverted.
+   */
+  undo(dryRun = false): OpEntry {
+    const t = this.current();
+    return this.tx(() => {
+      const op = this.db
+        .prepare(
+          `SELECT id, at, label, undoes, undone_by FROM ops
+           WHERE thread_id = ? AND NOT open AND undoes IS NULL AND undone_by IS NULL ORDER BY id DESC LIMIT 1`,
+        )
+        .get(t.id) as Omit<OpEntry, "changes"> | undefined;
+      if (!op) throw new PlantrailError(`Nothing to undo in ${t.id}`);
+      const events = this.opEvents(op.id, true);
+      for (const e of events) {
+        if (e.tbl === "threads" && e.action === "insert")
+          throw new PlantrailError(`op ${op.id} created thread ${JSON.parse(e.row_key).id}; undo can't remove threads (use \`plantrail finish\`)`);
+        const { pk } = AUDITED[e.tbl];
+        const where = pk.map((c) => `${c} = json_extract(:key, '$.${c}')`).join(" AND ");
+        const cur = this.db.prepare(`SELECT ${rowJson(e.tbl)} AS j FROM ${e.tbl} WHERE ${where}`).get({ key: e.row_key }) as
+          | { j: string }
+          | undefined;
+        if ((cur?.j ?? null) !== e.new)
+          throw new PlantrailError(`Can't undo op ${op.id}: ${describeEvent(e).split(":")[0]} has changed since`);
+      }
+      const entry = { ...op, changes: [...events].reverse().map(describeEvent) };
+      if (dryRun) return entry;
+      for (const e of events) {
+        const { pk, cols } = AUDITED[e.tbl];
+        const where = pk.map((c) => `${c} = json_extract(:key, '$.${c}')`).join(" AND ");
+        const val = (c: string) => `json_extract(:row, '$.${c}')`;
+        const sql =
+          e.action === "insert"
+            ? `DELETE FROM ${e.tbl} WHERE ${where}`
+            : e.action === "delete"
+              ? `INSERT INTO ${e.tbl} (${cols.join(", ")}) SELECT ${cols.map(val).join(", ")}`
+              : `UPDATE ${e.tbl} SET ${cols.map((c) => `${c} = ${val(c)}`).join(", ")} WHERE ${where}`;
+        const params: Record<string, string> = {};
+        if (e.action !== "delete") params.key = e.row_key;
+        if (e.action !== "insert") params.row = e.old!;
+        this.db.prepare(sql).run(params);
+      }
+      this.db.prepare("UPDATE ops SET undoes = ? WHERE open").run(op.id);
+      this.db.prepare("UPDATE ops SET undone_by = (SELECT id FROM ops WHERE open) WHERE id = ?").run(op.id);
+      this.touch(t.id);
+      return entry;
+    });
+  }
+
   // ---------- export ----------
 
   /** Full dump of a thread (default: bound): nodes in tree order, edges, links, checkpoints. */
@@ -1074,14 +1185,22 @@ export class Store {
           `\`~/.plantrail/bin/plantrail create "<title>" --goal "<goal>"\` then \`${cmd}\`.`;
   }
 
-  /** Nodes updated after the thread's last checkpoint (and after `since`, if later). */
-  private changedSince(threadId: string, since?: string | null): Node[] {
+  /**
+   * Nodes with recorded changes after the thread's last checkpoint (and after
+   * event `since`, if later), in order of first change. Deleted nodes drop out.
+   */
+  private changedSince(threadId: string, since?: number | null): Node[] {
     const cp = this.db
-      .prepare("SELECT created_at FROM checkpoints WHERE thread_id = ? ORDER BY id DESC LIMIT 1")
-      .get(threadId) as { created_at: string } | undefined;
-    const mark = [cp?.created_at, since].filter(Boolean).sort().pop() ?? "";
+      .prepare("SELECT max(seq) AS seq FROM events WHERE thread_id = ? AND tbl = 'checkpoints' AND action = 'insert'")
+      .get(threadId) as { seq: number | null };
+    const mark = Math.max(cp.seq ?? 0, since ?? 0);
     return this.db
-      .prepare("SELECT * FROM nodes WHERE thread_id = ? AND updated_at > ? ORDER BY updated_at")
+      .prepare(
+        `SELECT n.* FROM nodes n JOIN (
+           SELECT json_extract(row_key, '$.id') AS id, min(seq) AS first FROM events
+           WHERE thread_id = ? AND tbl = 'nodes' AND seq > ? GROUP BY 1
+         ) e ON e.id = n.id ORDER BY e.first`,
+      )
       .all(threadId, mark) as unknown as Node[];
   }
 
@@ -1093,9 +1212,9 @@ export class Store {
   stopNudge(sessionId = this.session): string | null {
     const t = this.hookThread(sessionId);
     if (!t) return null;
-    const changed = this.changedSince(t.id, t.nudged_at);
+    const changed = this.changedSince(t.id, t.nudged_seq);
     if (!changed.length) return null;
-    this.db.prepare("UPDATE threads SET nudged_at = ? WHERE id = ?").run(this.ts(), t.id);
+    this.db.prepare("UPDATE threads SET nudged_seq = (SELECT max(seq) FROM events) WHERE id = ?").run(t.id);
     const list = changed.slice(0, 5).map((n) => `${n.id} (${n.status})`).join(", ");
     const unpushed = unpushedCount(this.cwd);
     return (
@@ -1181,6 +1300,28 @@ const STOPWORDS = new Set(
 
 function clip(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+/** One-line description of a recorded change, e.g. `n3: status open→done, summary`. */
+function describeEvent(e: EventRow): string {
+  const row = JSON.parse((e.new ?? e.old)!) as Record<string, unknown>;
+  const sign = e.action === "insert" ? "+" : e.action === "delete" ? "-" : "";
+  const what =
+    e.tbl === "nodes"
+      ? `${sign}${row.id}`
+      : e.tbl === "edges"
+        ? `${sign}edge ${row.from_id} ${row.type} ${row.to_id}`
+        : e.tbl === "links"
+          ? `${sign}link ${row.kind}:${row.value}`
+          : e.tbl === "checkpoints"
+            ? `${sign}checkpoint #${row.id}`
+            : `${sign}thread ${row.id}`;
+  if (e.action !== "update") return e.tbl === "nodes" ? `${what} ${clip(String(row.title), 60)}` : what;
+  const old = JSON.parse(e.old!) as Record<string, unknown>;
+  const diffs = Object.keys(row)
+    .filter((k) => k !== "updated_at" && old[k] !== row[k])
+    .map((k) => (k === "status" || k === "priority" || k === "parent_id" ? `${k} ${old[k] ?? "∅"}→${row[k] ?? "∅"}` : k));
+  return `${what}: ${diffs.join(", ") || "touched"}`;
 }
 
 function fmt(n: Node): string {

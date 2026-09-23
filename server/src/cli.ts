@@ -42,6 +42,8 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   delete ID                                delete a mistaken leaf node with no edges
   next [-n N] [--all]                      ranked options to work on next (--all: across every active thread)
   log [-n N]                               recent checkpoints and done/abandoned nodes (default 10)
+  history [-n N]                           recent commands on the bound thread and every row they changed
+  undo [--dry-run]                         revert the latest command on the bound thread (repeat to walk back)
   get ID [--depth D]                       full node detail (+ subtree)
   search QUERY [--all] [--kind K] [-n N]   full-text search this thread (--all: every thread);
                                            words match as prefixes, "quoted phrases" exactly
@@ -187,6 +189,11 @@ function main(argv = process.argv.slice(2)): number {
   // this session's own binding even when other sessions share the cwd.
   store.session = session ?? process.env.CLAUDE_CODE_SESSION_ID ?? null;
   if (v.thread) store.bound = store.getThread(v.thread).id;
+  // Op label for history: the command line minus where/who it ran as.
+  store.label = argv
+    .filter((a, i) => !/^--(session|cwd)(=|$)/.test(a) && !/^--(session|cwd)$/.test(argv[i - 1] ?? ""))
+    .join(" ")
+    .slice(0, 200);
   const out = (s: string) => console.log(s);
 
   switch (cmd) {
@@ -370,6 +377,14 @@ function main(argv = process.argv.slice(2)): number {
     case "log":
       out(fmt.formatLog(store.log(intOf(v.n, "-n") ?? 10)));
       return 0;
+    case "history":
+      out(fmt.formatHistory(store.history(intOf(v.n, "-n") ?? 10)));
+      return 0;
+    case "undo": {
+      const op = store.undo(v["dry-run"]);
+      out(fmt.formatUndo(op, !!v["dry-run"]));
+      return 0;
+    }
     case "get":
       out(store.getText(need(arg, "ID"), intOf(v.depth, "--depth") ?? 0));
       return 0;

@@ -1,7 +1,7 @@
 // Result formatting for the CLI. `doneHint` renders the "complete the parent"
 // suggestion in the caller's syntax.
 import type { LinkKey } from "./repo.ts";
-import type { AddItem, LogEntry, Node, Option, SearchHit, Thread } from "./store.ts";
+import type { AddItem, LogEntry, Node, OpEntry, Option, SearchHit, Thread } from "./store.ts";
 
 export type DoneHint = (id: string) => string;
 type Closed = { node: Node; unblocked: Node[]; parentReady: Node | null };
@@ -95,4 +95,18 @@ export function formatLog(es: LogEntry[]): string {
       return `${at} checkpoint: ${e.checkpoint.replace(/\n+/g, " ")}`;
     })
     .join("\n");
+}
+
+function opHead(o: OpEntry): string {
+  const tag = o.undoes != null ? ` (undid op ${o.undoes})` : o.undone_by != null ? ` [undone by op ${o.undone_by}]` : "";
+  return `op ${o.id} ${o.at.slice(0, 16)} ${o.label ?? "(no label)"}${tag}`;
+}
+
+export function formatHistory(ops: OpEntry[]): string {
+  if (!ops.length) return "No recorded changes yet.";
+  return ops.map((o) => [opHead(o), ...o.changes.map((c) => `  ${c}`)].join("\n")).join("\n");
+}
+
+export function formatUndo(o: OpEntry, dryRun: boolean): string {
+  return [`${dryRun ? "Would undo" : "Undid"} ${opHead(o)}`, ...o.changes.map((c) => `  ${c}`)].join("\n");
 }

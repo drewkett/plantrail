@@ -262,6 +262,64 @@ test("contradicting findings mark a question contested in next and status", () =
   assert.doesNotMatch(store.statusText(), /Contradictions/);
 });
 
+test("changes are tracked by event order, not timestamps", () => {
+  const { store } = setup(); // clock never advances: every write shares one timestamp
+  const [a, b] = store.add([{ title: "a" }, { title: "b" }]);
+  store.checkpoint("cp");
+  assert.equal(store.autoCheckpoint(), null);
+  store.start(b.id);
+  assert.match(store.stopNudge() ?? "", /1 node\(s\) changed since the last checkpoint: n2 \(active\)/);
+  assert.equal(store.stopNudge(), null);
+  store.done(a.id, "did a");
+  assert.match(store.stopNudge() ?? "", /: n1 \(done\)/);
+});
+
+test("history records each op; undo walks back and refuses conflicts", () => {
+  const { store, clock } = setup();
+  store.label = "add";
+  const [a, b] = store.add([{ title: "a" }, { title: "b", blocked_by: ["#1"] }]);
+  clock.advance(1000);
+  store.label = "done";
+  store.start(a.id);
+  store.done(a.id, "did a");
+  const [latest] = store.history(1);
+  assert.equal(latest.label, "done");
+  assert.deepEqual(latest.changes, ["n1: status active→done, summary"]);
+  assert.match(store.history().map((o) => o.changes.join(";")).join("\n"), /\+n2 b.*\+edge n1 blocks n2/s);
+
+  assert.equal(store.undo(true).label, "done");
+  assert.equal(store.getNode(a.id).status, "done"); // dry run changed nothing
+  const u = store.undo();
+  assert.deepEqual(u.changes, ["n1: status active→done, summary"]);
+  const n1 = store.getNode(a.id);
+  assert.equal(n1.status, "active");
+  assert.equal(n1.summary, null);
+  assert.equal(store.search("did").length, 0); // FTS follows restored rows
+  assert.match(store.history(1)[0].label ?? "", /done/);
+  assert.equal(store.history(1)[0].undoes, u.id);
+
+  assert.equal(store.undo().label, "done"); // the start
+  assert.equal(store.getNode(a.id).status, "open");
+  store.undo(); // the add
+  assert.throws(() => store.getNode(b.id), /No node/);
+  assert.equal(store.search("b").length, 0);
+  assert.throws(() => store.undo(), /created thread t1; undo can.t remove threads/);
+});
+
+test("undo refuses when a touched row changed outside recorded ops, and restores deletes", () => {
+  const { store, db } = setup();
+  const [a] = store.add([{ title: "a" }]);
+  store.update(a.id, { title: "a2" });
+  db.prepare("UPDATE nodes SET title = 'sneaky' WHERE id = ?").run(a.id);
+  assert.throws(() => store.undo(), /Can't undo op \d+: n1 has changed since/);
+  db.prepare("UPDATE nodes SET title = 'a2' WHERE id = ?").run(a.id);
+  const [c] = store.add([{ title: "c" }]);
+  store.deleteNode(c.id);
+  assert.match(store.undo().changes[0], /^-n2 c/);
+  assert.equal(store.getNode(c.id).title, "c");
+  assert.equal(store.search("c").length, 1);
+});
+
 test("search ranks title hits, matches prefixes/phrases, and scopes to thread", () => {
   const { store } = setup();
   const [a, b] = store.add([

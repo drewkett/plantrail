@@ -45,7 +45,7 @@ plantrail next
 plantrail checkpoint "state, next step, anything non-obvious"
 ```
 
-Other commands include `status`, `threads`, `bind`, `park`, `finish`, `finding`, `edge`, `search`, `log`, `get`, `export` (markdown/JSON/HTML), and `serve` (a local live web view on port 7847). Run `plantrail help` for full usage.
+Other commands include `status`, `threads`, `bind`, `park`, `finish`, `finding`, `edge`, `search`, `log`, `history` (every recorded change), `undo` (revert the last command), `get`, `export` (markdown/JSON/HTML), and `serve` (a local live web view on port 7847). Run `plantrail help` for full usage.
 
 ## Development
 
