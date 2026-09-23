@@ -21,7 +21,15 @@ On first session start, the plugin installs a shim at `~/.plantrail/bin/plantrai
 - **PreCompact hook**: saves an automatic checkpoint if anything changed.
 - **Stop hook**: reminds Claude once to mark finished nodes done and checkpoint.
 - **Skills**: `plantrail` (the task-tracking workflow) and `research` (open-ended research as a tree of questions and findings with confidence levels).
-- **Commands**: `/plantrail:status` and `/plantrail:next`.
+- **Commands**:
+  - `/plantrail:status`: summarize the bound thread.
+  - `/plantrail:next`: recommend what to work on next and wait for confirmation.
+  - `/plantrail:continue`: resume from the last checkpoint and keep working.
+  - `/plantrail:plan <goal>`: break a goal into nodes and show them for approval.
+  - `/plantrail:ask <question>`: answer only from recorded state, citing node ids.
+  - `/plantrail:checkpoint`: write a handoff note now, e.g. before `/clear`.
+  - `/plantrail:done`: close the active node with a summary drafted from the conversation and commits.
+  - `/plantrail:research <question>`: start research using the `research` skill.
 
 Claude drives it through the skills. You can also use the CLI directly.
 
