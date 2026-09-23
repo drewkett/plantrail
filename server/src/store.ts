@@ -503,10 +503,19 @@ export class Store {
     if (!summary?.trim()) throw new PlantrailError("done requires a non-empty summary");
     return this.tx(() => {
       const node = this.getNode(id);
-      if (node.status === "done") throw new PlantrailError(`${id} is already done`);
-      this.checkChildrenResolved(id);
+      this.checkClosable(node);
       return this.complete(node, summary.trim(), refs, this.ts());
     });
+  }
+
+  /** A node can be completed only if it's unresolved, unblocked, and its children are resolved. */
+  private checkClosable(node: Node): void {
+    if (node.status === "done") throw new PlantrailError(`${node.id} is already done`);
+    if (node.status === "abandoned") throw new PlantrailError(`${node.id} is abandoned; reopen it with update first`);
+    const blockers = this.blockers(node.id);
+    if (blockers.length)
+      throw new PlantrailError(`${node.id} is blocked by ${blockers.map((b) => `${b.id} "${b.title}"`).join(", ")}`);
+    this.checkChildrenResolved(node.id);
   }
 
   private checkChildrenResolved(id: string): void {
@@ -571,8 +580,7 @@ export class Store {
       if (parent.kind === "finding") throw new PlantrailError(`${parentId} is a finding; attach to the question it informs`);
       if (answers) {
         if (parent.kind !== "question") throw new PlantrailError(`${parentId} is a ${parent.kind}; only questions can be answered`);
-        if (RESOLVED.includes(parent.status)) throw new PlantrailError(`${parentId} is already ${parent.status}`);
-        this.checkChildrenResolved(parentId);
+        this.checkClosable(parent);
       }
       const id = this.nextId("n");
       const now = this.ts();

@@ -56,6 +56,12 @@ test("guards on status transitions", () => {
   store.update(a.id, { status: "open" });
   store.done(a.id, "ok");
   assert.throws(() => store.done(a.id, "again"), /already done/);
+  const [x, y, z] = store.add([{ title: "x" }, { title: "y", blocked_by: ["#1"] }, { title: "z" }]);
+  assert.throws(() => store.done(y.id, "early"), /n\d+ is blocked by n\d+ "x"/);
+  store.update(z.id, { status: "abandoned", summary: "dropped" });
+  assert.throws(() => store.done(z.id, "late"), /abandoned; reopen it/);
+  store.done(x.id, "x");
+  assert.equal(store.done(y.id, "now").node.status, "done");
   assert.throws(() => store.start(a.id), /reopen/);
 });
 
