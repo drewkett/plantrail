@@ -300,7 +300,7 @@ export class Store {
   }
 
   /** Threads with the given status linked to any of the given location keys, most recently touched first. */
-  threadsForLocation(keys: LinkKey[], status: "active" | "parked" = "active", limit = -1): Thread[] {
+  threadsForLocation(keys: LinkKey[], status: ThreadStatus = "active", limit = -1): Thread[] {
     if (!keys.length) return [];
     const cond = keys.map(() => "(l.kind = ? AND l.value = ?)").join(" OR ");
     return this.db
@@ -446,12 +446,14 @@ export class Store {
          WHERE s.cwd = ? AND t.status = 'active' ORDER BY s.bound_at DESC LIMIT 1`,
       )
       .get(this.cwd) as { thread_id: string } | undefined;
-    const { id, ranked } = this.locate(locationKeys(this.cwd), recent?.thread_id ?? null);
+    const keys = locationKeys(this.cwd);
+    const { id, ranked } = this.locate(keys, recent?.thread_id ?? null);
     if (id) return this.getThread((this.bound = id));
     const hint = ranked.length
       ? `Linked threads here: ${ranked.map((t) => `${t.id} "${t.title}"`).join(", ")}.`
       : "Use `plantrail threads` or `plantrail create`.";
-    throw new NotBoundError(`No thread bound. Run \`plantrail bind <thread_id>\`. ${hint}`);
+    const inactive = ranked.length ? "" : this.inactiveHere(keys);
+    throw new NotBoundError(`No thread bound. Run \`plantrail bind <thread_id>\`. ${hint}${inactive && `\n${inactive}`}`);
   }
 
   // ---------- nodes ----------
@@ -1315,16 +1317,16 @@ export class Store {
         ...ranked.map((t) => `  ${t.id} "${t.title}" (touched ${t.touched_at.slice(0, 10)})`),
       ].join("\n");
     }
-    return this.parkedHere(keys);
+    return this.inactiveHere(keys);
   }
 
-  /** Hint about parked threads linked here, shown when no active thread is. */
-  private parkedHere(keys: LinkKey[]): string {
-    const parked = this.threadsForLocation(keys, "parked", 3);
-    if (!parked.length) return "";
+  /** Recent parked and done threads linked here, shown when no active thread is (empty if none). */
+  private inactiveHere(keys: LinkKey[]): string {
+    const ts = [...this.threadsForLocation(keys, "parked", 3), ...this.threadsForLocation(keys, "done", 3)];
+    if (!ts.length) return "";
     return [
-      "[plantrail] Parked threads linked here (idle; not resumed). If the user's task continues one, run `plantrail bind <thread_id>` to reactivate it:",
-      ...parked.map((t) => `  ${t.id} "${t.title}" (touched ${t.touched_at.slice(0, 10)})`),
+      "[plantrail] No active thread is linked here. Recent inactive ones (not resumed); if the user's task continues one, run `plantrail bind <thread_id>` (parked) or `plantrail reopen <thread_id>` (done):",
+      ...ts.map((t) => `  ${t.id} [${t.status}] "${t.title}" (touched ${t.touched_at.slice(0, 10)})`),
     ].join("\n");
   }
 }

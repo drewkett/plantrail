@@ -422,8 +422,8 @@ test("resume auto-parks idle threads; bind reactivates; status flags long-active
   clock.advance(30 * 86_400_000);
   const fresh = new Store(db, dir, store.now);
   const text = fresh.resume("s1");
-  assert.match(text, /Parked threads linked here/);
-  assert.match(text, /t1 "Test"/);
+  assert.match(text, /No active thread is linked here/);
+  assert.match(text, /t1 \[parked\] "Test"/);
   assert.equal(fresh.getThread("t1").status, "parked");
   assert.equal(fresh.bind("t1").status, "active");
   assert.match(fresh.resume("s1"), /^\[plantrail\] t1 "Test" \(active\)/);
@@ -648,4 +648,11 @@ test("resume/current pick the thread linked most specifically to this worktree/b
   at(plain, "s5").createThread("A", "g");
   at(plain, "s6").createThread("B", "g");
   assert.match(at(plain).resume("r5"), /Several active threads/);
+});
+
+test("done threads linked here are listed when nothing is active, in resume and the unbound error", () => {
+  const { store, db, dir } = setup();
+  store.finishThread("t1");
+  assert.match(new Store(db, dir).resume("s9"), /plantrail reopen <thread_id>[\s\S]*t1 \[done\] "Test"/);
+  assert.throws(() => new Store(db, dir).current(), /No thread bound[\s\S]*t1 \[done\] "Test"/);
 });
