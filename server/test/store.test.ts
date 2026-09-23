@@ -656,3 +656,17 @@ test("done threads linked here are listed when nothing is active, in resume and 
   assert.match(new Store(db, dir).resume("s9"), /plantrail reopen <thread_id>[\s\S]*t1 \[done\] "Test"/);
   assert.throws(() => new Store(db, dir).current(), /No thread bound[\s\S]*t1 \[done\] "Test"/);
 });
+
+test("/clear keeps the Claude process's thread when several share the location; other starts don't", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "plantrail-clear-")));
+  const db = openDb(":memory:");
+  const at = (session: string, pid: number | null) => Object.assign(new Store(db, dir), { session, pid });
+  at("a1", 100).createThread("A", "g");
+  at("b1", 200).createThread("B", "g");
+  assert.match(at("a2", 100).resume("a2", "clear"), /^\[plantrail\] t1 "A"/);
+  assert.match(at("b2", 200).resume("b2", "clear"), /^\[plantrail\] t2 "B"/);
+  assert.equal(at("a2", null).current().id, "t1");
+  // A fresh process that reuses a pid, or a start without a pid, still asks.
+  assert.match(at("c1", 100).resume("c1", "startup"), /Several active threads/);
+  assert.match(at("c2", null).resume("c2", "clear"), /Several active threads/);
+});

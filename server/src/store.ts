@@ -130,6 +130,8 @@ export class Store {
   bound: string | null = null;
   /** Claude session this process runs in (hook payload or $CLAUDE_CODE_SESSION_ID), if known. */
   session: string | null = null;
+  /** Claude process pid ($CLAUDE_PID), if known; it survives /clear, which starts a new session. */
+  pid: number | null = null;
   /** Recorded on each op, e.g. the CLI command line. */
   label: string | null = null;
 
@@ -317,10 +319,10 @@ export class Store {
     // so later processes in the same directory can pick the binding up.
     this.db
       .prepare(
-        `INSERT INTO sessions (session_id, thread_id, cwd, bound_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT(session_id) DO UPDATE SET thread_id = excluded.thread_id, cwd = excluded.cwd, bound_at = excluded.bound_at`,
+        `INSERT INTO sessions (session_id, thread_id, cwd, bound_at, pid) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET thread_id = excluded.thread_id, cwd = excluded.cwd, bound_at = excluded.bound_at, pid = excluded.pid`,
       )
-      .run(sessionId ?? `cwd:${this.cwd}`, threadId, this.cwd, this.ts());
+      .run(sessionId ?? `cwd:${this.cwd}`, threadId, this.cwd, this.ts(), this.pid);
     this.touch(threadId);
   }
 
@@ -1297,10 +1299,27 @@ export class Store {
     return { ...this.checkpoint(note), thread: t.id };
   }
 
-  /** SessionStart: bind the session to its previous thread or the one linked here, and describe it. */
-  resume(sessionId = this.session): string {
+  /** Active thread most recently bound by another session of this Claude process, if any. */
+  private processThread(sessionId: string | null): string | null {
+    if (this.pid === null) return null;
+    const r = this.db
+      .prepare(
+        `SELECT s.thread_id FROM sessions s JOIN threads t ON t.id = s.thread_id
+         WHERE s.pid = ? AND s.session_id IS NOT ? AND t.status = 'active' ORDER BY s.bound_at DESC LIMIT 1`,
+      )
+      .get(this.pid, sessionId) as { thread_id: string } | undefined;
+    return r?.thread_id ?? null;
+  }
+
+  /**
+   * SessionStart: bind the session to its previous thread, or after /clear
+   * (`source` "clear": same process, new session id) the process's last
+   * thread, or the one linked here, and describe it. Only /clear inherits by
+   * pid, so a new process that reuses an old pid doesn't.
+   */
+  resume(sessionId = this.session, source?: string): string {
     this.autoPark();
-    const prev = this.sessionThread(sessionId);
+    const prev = this.sessionThread(sessionId) ?? (source === "clear" ? this.processThread(sessionId) : null);
     if (prev) {
       this.bindInner(prev, sessionId);
       return this.statusText(prev);

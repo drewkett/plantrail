@@ -198,6 +198,11 @@ const MIGRATIONS: string[] = [
   CREATE INDEX links_value ON links(kind, value);
   ${eventTriggers(["links"])}
   `,
+  // Claude process pid per binding, so a session started by /clear in the same process keeps its thread.
+  `
+  ALTER TABLE sessions ADD COLUMN pid INTEGER;
+  CREATE INDEX sessions_pid ON sessions(pid, bound_at);
+  `,
 ];
 
 export function openDb(path?: string): DB {

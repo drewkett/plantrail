@@ -66,6 +66,7 @@ function readStdin(): string {
 function readHookInput(): {
   cwd?: string;
   session_id?: string;
+  source?: string;
   stop_hook_active?: boolean;
   trigger?: string;
   tool_input?: { plan?: string };
@@ -188,6 +189,8 @@ function main(argv = process.argv.slice(2)): number {
   // Claude Code exports the session id to Bash commands, so CLI calls resolve
   // this session's own binding even when other sessions share the cwd.
   store.session = session ?? process.env.CLAUDE_CODE_SESSION_ID ?? null;
+  // Claude Code exports its pid to hooks and Bash; it outlives /clear's new session id.
+  store.pid = Number(process.env.CLAUDE_PID) || null;
   if (v.thread) store.bound = store.getThread(v.thread).id;
   // Op label for history: the command line minus where/who it ran as.
   store.label = argv
@@ -210,7 +213,7 @@ function main(argv = process.argv.slice(2)): number {
   switch (cmd) {
     case "resume": {
       installShim();
-      const text = store.resume();
+      const text = store.resume(undefined, input.source);
       if (!text) return 0;
       if (v.hook) {
         // JSON output: full status goes to Claude's context, a one-line notice to the user.
