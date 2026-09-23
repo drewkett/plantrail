@@ -670,3 +670,20 @@ test("/clear keeps the Claude process's thread when several share the location; 
   assert.match(at("c1", 100).resume("c1", "startup"), /Several active threads/);
   assert.match(at("c2", null).resume("c2", "clear"), /Several active threads/);
 });
+
+test("the several-threads prompt marks threads other sessions bound in the last day", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "plantrail-busy-")));
+  const db = openDb(":memory:");
+  let t = Date.parse("2026-01-01T00:00:00Z");
+  const at = (session: string, pid: number | null = null) => Object.assign(new Store(db, dir, () => new Date(t)), { session, pid });
+  at("a", 1).createThread("A", "g");
+  at("b", 2).createThread("B", "g");
+  t += 12 * 60_000;
+  const text = at("c", 3).resume();
+  assert.match(text, /likely in use there/);
+  assert.match(text, /t1 "A" \(touched [\d-]+; bound by another session 12m ago\)/);
+  // Its own process's earlier session (before /clear) isn't "another session".
+  assert.doesNotMatch(at("c2", 1).resume(), /t1 "A" \([^)]*another session/);
+  t += 2 * 86_400_000;
+  assert.doesNotMatch(at("d", 4).resume(), /another session/);
+});

@@ -1331,12 +1331,36 @@ export class Store {
       return this.statusText(id);
     }
     if (ranked.length) {
+      const inUse = this.inUseElsewhere(sessionId);
+      const note = (t: Thread) => (inUse.has(t.id) ? `; bound by another session ${inUse.get(t.id)} ago` : "");
       return [
-        "[plantrail] Several active threads are linked to this location, none more specifically than the others. Ask the user which one, then run `plantrail bind <thread_id>`:",
-        ...ranked.map((t) => `  ${t.id} "${t.title}" (touched ${t.touched_at.slice(0, 10)})`),
+        "[plantrail] Several active threads are linked to this location, none more specifically than the others. Ask the user which one, then run `plantrail bind <thread_id>`" +
+          (ranked.some((t) => inUse.has(t.id)) ? "; threads another session bound recently are likely in use there:" : ":"),
+        ...ranked.map((t) => `  ${t.id} "${t.title}" (touched ${t.touched_at.slice(0, 10)}${note(t)})`),
       ].join("\n");
     }
     return this.inactiveHere(keys);
+  }
+
+  /**
+   * Threads bound in the last day by other Claude sessions (not this one or its
+   * process), mapped to how long ago, e.g. "12m".
+   */
+  private inUseElsewhere(sessionId: string | null): Map<string, string> {
+    const now = this.now().getTime();
+    const rows = this.db
+      .prepare(
+        `SELECT thread_id, MAX(bound_at) AS at FROM sessions
+         WHERE bound_at >= ? AND session_id NOT LIKE 'cwd:%' AND session_id IS NOT ? AND (pid IS NULL OR pid IS NOT ?)
+         GROUP BY thread_id`,
+      )
+      .all(new Date(now - DAY).toISOString(), sessionId, this.pid) as { thread_id: string; at: string }[];
+    return new Map(
+      rows.map((r) => {
+        const min = Math.max(0, Math.floor((now - Date.parse(r.at)) / 60_000));
+        return [r.thread_id, min < 60 ? `${min}m` : `${Math.floor(min / 60)}h`];
+      }),
+    );
   }
 
   /** Recent parked and done threads linked here, shown when no active thread is (empty if none). */
