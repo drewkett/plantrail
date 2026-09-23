@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { DB } from "./db.ts";
-import { locationKeys, type LinkKey } from "./repo.ts";
+import { locationKeys, unpushedCount, type LinkKey } from "./repo.ts";
 
 export type NodeKind = "task" | "question" | "finding" | "decision";
 export type EdgeType = "blocks" | "derived_from" | "contradicts";
@@ -1032,10 +1032,12 @@ export class Store {
     if (!changed.length) return null;
     this.db.prepare("UPDATE threads SET nudged_at = ? WHERE id = ?").run(this.ts(), t.id);
     const list = changed.slice(0, 5).map((n) => `${n.id} (${n.status})`).join(", ");
+    const unpushed = unpushedCount(this.cwd);
     return (
       `[plantrail] ${t.id}: ${changed.length} node(s) changed since the last checkpoint: ${list}${changed.length > 5 ? ", …" : ""}. ` +
       "Before stopping: mark finished nodes done with a summary, add any new work you found, and run " +
-      "`plantrail checkpoint \"<state, next step, gotchas>\"`. If that's already covered, just stop."
+      "`plantrail checkpoint \"<state, next step, gotchas>\"`. If that's already covered, just stop." +
+      (unpushed ? ` Note: ${unpushed} commit(s) on this branch aren't pushed; say so in the checkpoint.` : "")
     );
   }
 

@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -285,6 +286,25 @@ test("stop hook nudges once per batch of changes; precompact auto-checkpoints", 
   assert.match(store.statusText(), /Last checkpoint .*auto \(before \/compact\).*Changed: n1 done/);
   clock.advance(1000);
   assert.equal(store.stopNudge(), null);
+});
+
+test("stop nudge mentions unpushed commits", () => {
+  const { store, clock, dir } = setup();
+  const git = (...args: string[]) => execFileSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { stdio: "ignore" });
+  const remote = mkdtempSync(join(tmpdir(), "plantrail-remote-"));
+  execFileSync("git", ["init", "-q", "--bare", remote]);
+  git("init", "-q");
+  git("commit", "-q", "--allow-empty", "-m", "one");
+  git("remote", "add", "origin", remote);
+  git("push", "-q", "-u", "origin", "HEAD");
+  const [a] = store.add([{ title: "a" }]);
+  clock.advance(1000);
+  store.start(a.id);
+  assert.doesNotMatch(store.stopNudge() ?? "", /unpushed|aren't pushed/);
+  git("commit", "-q", "--allow-empty", "-m", "two");
+  clock.advance(1000);
+  store.done(a.id, "did a");
+  assert.match(store.stopNudge() ?? "", /1 commit\(s\) on this branch aren't pushed/);
 });
 
 test("resume auto-parks idle threads; bind reactivates; status flags long-active nodes", () => {

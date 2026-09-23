@@ -36,3 +36,9 @@ export function locationKeys(cwd: string): LinkKey[] {
   if (remote) keys.push({ kind: "repo", value: remote });
   return keys;
 }
+
+/** Commits on the current branch not yet on its upstream, or null outside git / without an upstream. */
+export function unpushedCount(cwd: string): number | null {
+  const n = git(cwd, ["rev-list", "--count", "@{upstream}..HEAD"]);
+  return n === null ? null : Number(n);
+}
