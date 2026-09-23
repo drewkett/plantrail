@@ -19,6 +19,7 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   rename [TITLE] [--goal G]                change the bound thread's title and/or goal (or --thread ID)
   link [THREAD_ID] [--prune]               link this dir/repo to a thread (default: bound), e.g. after
                                            a repo moved; --prune drops links to paths that no longer exist
+  link url:URL | ticket:ID                 attach an issue/PR/doc link to the bound thread (or --thread ID)
   unlink KIND:VALUE                        remove one link, as printed by 'link' (or --thread ID)
   add TITLE [--kind K] [--parent ID] [--body B] [--priority N] [--blocks ID,..] [--blocked-by ID,..]
   add -                                    add items from a JSON array on stdin
@@ -235,7 +236,7 @@ function main(argv = process.argv.slice(2)): number {
       return 0;
     }
     case "link": {
-      out(fmt.formatRelink(store.relink(arg, !!v.prune)));
+      out(fmt.formatRelink(arg?.includes(":") ? store.linkRef(v.thread, arg) : store.relink(arg, !!v.prune)));
       return 0;
     }
     case "unlink": {

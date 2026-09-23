@@ -96,6 +96,20 @@ test("cli: unlink reports bad input as a clean error", () => {
   }
 });
 
+test("cli: link attaches url:/ticket: links, rejects hand-made repo/dir links", () => {
+  const ap = setup();
+  ap(["create", "Demo", "--goal", "g"]);
+  const r = ap(["link", "url:https://github.com/x/y/issues/1"]);
+  assert.match(r.out, /Added: url:https:\/\/github.com\/x\/y\/issues\/1\nLinks: .*url:https:\/\/github.com\/x\/y\/issues\/1/);
+  assert.match(ap(["link", "ticket:ABC-12", "--thread", "t1"]).out, /Added: ticket:ABC-12/);
+  assert.doesNotMatch(ap(["link", "ticket:ABC-12"]).out, /Added/);
+  assert.match(ap(["export", "--format", "md"]).out, /Links: .*ticket:ABC-12/);
+  assert.match(ap(["link", "repo:/elsewhere"]).err, /Only url: and ticket:/);
+  assert.match(ap(["link", "bogus:x"]).err, /repo, dir, url or ticket/);
+  assert.match(ap(["link", "url:"]).err, /kind:value/);
+  assert.match(ap(["unlink", "ticket:ABC-12"]).out, /Removed: ticket:ABC-12/);
+});
+
 test("cli: sessions sharing a cwd keep their own thread via CLAUDE_CODE_SESSION_ID", () => {
   const ap = setup();
   ap(["create", "One", "--goal", "g"], undefined, "sA");

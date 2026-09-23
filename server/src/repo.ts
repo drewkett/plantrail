@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 
 export interface LinkKey {
-  kind: "repo" | "dir";
+  kind: "repo" | "dir" | "url" | "ticket";
   value: string;
 }
 

@@ -222,12 +222,22 @@ export class Store {
     });
   }
 
+  /** Attach a `url:` or `ticket:` link (e.g. an issue or PR) to a thread (default: bound). */
+  linkRef(threadId: string | undefined, spec: string): { added: LinkKey[]; removed: LinkKey[]; links: LinkKey[] } {
+    const t = threadId ? this.getThread(threadId) : this.current();
+    const key = parseLink(spec);
+    if (key.kind !== "url" && key.kind !== "ticket")
+      throw new PlantrailError(`Only url: and ticket: links can be added by hand; repo/dir links come from the current directory ('plantrail link'). Got '${spec}'`);
+    const before = this.links(t.id).length;
+    this.addLink(t.id, key);
+    const links = this.links(t.id);
+    return { added: links.length > before ? [key] : [], removed: [], links };
+  }
+
   /** Remove one link, given as `kind:value` exactly as `link` prints it. */
   unlink(threadId: string | undefined, spec: string): { removed: LinkKey; links: LinkKey[] } {
     const t = threadId ? this.getThread(threadId) : this.current();
-    const i = spec.indexOf(":");
-    if (i <= 0) throw new PlantrailError(`Link must be kind:value (e.g. repo:https://...), got '${spec}'`);
-    const removed = { kind: spec.slice(0, i), value: spec.slice(i + 1) } as LinkKey;
+    const removed = parseLink(spec);
     const r = this.db.prepare("DELETE FROM links WHERE thread_id = ? AND kind = ? AND value = ?").run(t.id, removed.kind, removed.value);
     if (!r.changes) throw new PlantrailError(`${t.id} has no link ${spec}`);
     return { removed, links: this.links(t.id) };
@@ -1108,4 +1118,13 @@ function clip(s: string, n: number): string {
 
 function fmt(n: Node): string {
   return `${n.id} ${n.kind === "task" ? "" : `(${n.kind}) `}${n.title}`;
+}
+
+/** Parse `kind:value`, splitting at the first colon (values such as URLs may contain more). */
+function parseLink(spec: string): LinkKey {
+  const i = spec.indexOf(":");
+  if (i <= 0 || i === spec.length - 1) throw new PlantrailError(`Link must be kind:value (e.g. url:https://...), got '${spec}'`);
+  const kind = spec.slice(0, i);
+  if (!["repo", "dir", "url", "ticket"].includes(kind)) throw new PlantrailError(`Link kind must be repo, dir, url or ticket, got '${kind}'`);
+  return { kind, value: spec.slice(i + 1) } as LinkKey;
 }

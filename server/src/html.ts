@@ -2,6 +2,7 @@ import type { ThreadExport } from "./store.ts";
 
 /** Human-readable locations: working dirs (repo git dirs minus /.git) first, then remotes. */
 export function locations(links: { kind: string; value: string }[]): string[] {
+  links = links.filter((l) => l.kind === "repo" || l.kind === "dir");
   const dirs = links.filter((l) => l.kind === "dir" || l.value.startsWith("/")).map((l) => l.value.replace(/\/\.git\/?$/, ""));
   const remotes = links.filter((l) => !(l.kind === "dir" || l.value.startsWith("/"))).map((l) => l.value);
   return [...new Set([...dirs, ...remotes])];
