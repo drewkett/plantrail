@@ -8,7 +8,7 @@ import { serve } from "./serve.ts";
 import * as fmt from "./format.ts";
 import { shortSha } from "./repo.ts";
 import { planItems } from "./markdown.ts";
-import { EDGE_TYPES, NODE_KINDS, PlantrailError, Store, type AddItem, type EdgeType, type NodeKind, type NodeStatus } from "./store.ts";
+import { EDGE_TYPES, NODE_KINDS, NotBoundError, PlantrailError, Store, type AddItem, type EdgeType, type NodeKind, type NodeStatus } from "./store.ts";
 
 const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   status                                   compact view of the bound thread
@@ -195,6 +195,17 @@ function main(argv = process.argv.slice(2)): number {
     .join(" ")
     .slice(0, 200);
   const out = (s: string) => console.log(s);
+  // Slash-command templates embed `status`/`next`; a non-zero exit aborts the
+  // whole command, so "nothing bound" is reported as normal output.
+  const unbound = (f: () => string): string => {
+    try {
+      return f();
+    } catch (e) {
+      if (!(e instanceof NotBoundError)) throw e;
+      const active = store.listThreads("active");
+      return active.length ? `${e.message}\nActive threads:\n${fmt.formatThreads(active, null)}` : e.message;
+    }
+  };
 
   switch (cmd) {
     case "resume": {
@@ -249,7 +260,7 @@ function main(argv = process.argv.slice(2)): number {
       return 0;
     }
     case "status":
-      out(store.statusText());
+      out(unbound(() => store.statusText()));
       return 0;
     case "threads": {
       const ts = store.listThreads(v.all ? "all" : "active");
@@ -371,7 +382,7 @@ function main(argv = process.argv.slice(2)): number {
     }
     case "next": {
       const n = intOf(v.n, "-n") ?? 3;
-      out(fmt.formatNext(v.all ? store.nextOptionsAll(n) : store.nextOptions(n)));
+      out(v.all ? fmt.formatNext(store.nextOptionsAll(n)) : unbound(() => fmt.formatNext(store.nextOptions(n))));
       return 0;
     }
     case "log":

@@ -21,7 +21,6 @@ function setup() {
 
 test("cli: create, add via stdin, workflow rules, status", () => {
   const ap = setup();
-  assert.equal(ap(["status"]).code, 1);
   assert.match(ap(["create", "Demo", "--goal", "g"]).out, /Created and bound t1/);
   const add = ap(["add", "-"], JSON.stringify([{ title: "a", blocks: ["#2"] }, { title: "b", kind: "question" }]));
   assert.equal(add.out, "n1 [task/open] a\nn2 [question/open] b");
@@ -147,6 +146,20 @@ test("cli: link attaches url:/ticket: links, rejects hand-made repo/dir links", 
   assert.match(ap(["link", "bogus:x"]).err, /repo, dir, url or ticket/);
   assert.match(ap(["link", "url:"]).err, /kind:value/);
   assert.match(ap(["unlink", "ticket:ABC-12"]).out, /Removed: ticket:ABC-12/);
+});
+
+test("cli: status/next exit 0 with guidance when no thread is bound", () => {
+  const ap = setup();
+  for (const cmd of ["status", "next"]) {
+    const r = ap([cmd]);
+    assert.equal(r.code, 0);
+    assert.match(r.out, /No thread bound\. Run `plantrail bind <thread_id>`/);
+  }
+  const other = mkdtempSync(join(tmpdir(), "plantrail-cwd-"));
+  ap(["--cwd", other, "create", "Elsewhere", "--goal", "g"]);
+  assert.match(ap(["status"]).out, /Active threads:\nt1 \[active\] Elsewhere/);
+  // Commands that need a thread still fail.
+  assert.equal(ap(["add", "x"]).code, 1);
 });
 
 test("cli: sessions sharing a cwd keep their own thread via CLAUDE_CODE_SESSION_ID", () => {

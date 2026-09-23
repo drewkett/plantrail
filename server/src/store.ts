@@ -115,6 +115,8 @@ export interface ThreadExport {
 }
 
 export class PlantrailError extends Error {}
+/** current() found no thread for this session/location. */
+export class NotBoundError extends PlantrailError {}
 
 const RESOLVED: NodeStatus[] = ["done", "abandoned"];
 /** Active threads untouched this long are parked by resume(). */
@@ -417,7 +419,7 @@ export class Store {
     const hint = linked.length
       ? `Linked threads here: ${linked.map((t) => `${t.id} "${t.title}"`).join(", ")}.`
       : "Use `plantrail threads` or `plantrail create`.";
-    throw new PlantrailError(`No thread bound. Run \`plantrail bind <thread_id>\`. ${hint}`);
+    throw new NotBoundError(`No thread bound. Run \`plantrail bind <thread_id>\`. ${hint}`);
   }
 
   // ---------- nodes ----------
