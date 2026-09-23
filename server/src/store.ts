@@ -398,9 +398,43 @@ export class Store {
   }
 
   /**
+   * Active threads linked to this location, best first: scored by the specific
+   * keys they match here (branch 2 + worktree 1; repo/dir only 0), then by
+   * recency. `top` is the leading run sharing the best score.
+   */
+  private rankedHere(keys: LinkKey[]): { ranked: { thread: Thread; score: number }[]; top: Thread[] } {
+    const weight: Partial<Record<LinkKey["kind"], number>> = { worktree: 1, branch: 2 };
+    const here = new Set(keys.map((k) => `${k.kind}\0${k.value}`));
+    const score = (t: Thread) =>
+      this.links(t.id).reduce((n, l) => n + (here.has(`${l.kind}\0${l.value}`) ? (weight[l.kind] ?? 0) : 0), 0);
+    // Stable sort keeps threadsForLocation's most-recently-touched order within a score.
+    const ranked = this.threadsForLocation(keys)
+      .map((thread) => ({ thread, score: score(thread) }))
+      .sort((a, b) => b.score - a.score);
+    return { ranked, top: ranked.filter((r) => r.score === ranked[0].score).map((r) => r.thread) };
+  }
+
+  /**
+   * The thread this location resolves to without a session binding: the most
+   * specific active thread linked here, with `recent` (e.g. the cwd's latest
+   * binding) winning unless a linked thread outranks it. Null when the top rank
+   * is tied, or nothing matches. A unique match gets this location's repo keys
+   * so it keeps matching if one of them (e.g. the path) changes.
+   */
+  private locate(keys: LinkKey[], recent: string | null): { id: string | null; ranked: Thread[] } {
+    const { ranked, top } = this.rankedHere(keys);
+    const threads = ranked.map((r) => r.thread);
+    if (recent && (ranked.find((r) => r.thread.id === recent)?.score ?? 0) >= (ranked[0]?.score ?? 0)) return { id: recent, ranked: threads };
+    if (top.length !== 1) return { id: null, ranked: threads };
+    for (const k of keys) if (isRepoKey(k)) this.addLink(top[0].id, k);
+    return { id: top[0].id, ranked: threads };
+  }
+
+  /**
    * Thread for the current process: explicit binding, else this session's
-   * binding, else the most recent binding in this cwd (for callers without a
-   * session id), else the single active thread linked to this location.
+   * binding, else the most specific active thread linked to this location,
+   * with the cwd's most recent binding breaking ties (for callers without a
+   * session id).
    */
   current(): Thread {
     if (this.bound) return this.getThread(this.bound);
@@ -412,19 +446,10 @@ export class Store {
          WHERE s.cwd = ? AND t.status = 'active' ORDER BY s.bound_at DESC LIMIT 1`,
       )
       .get(this.cwd) as { thread_id: string } | undefined;
-    if (recent) {
-      this.bound = recent.thread_id;
-      return this.getThread(recent.thread_id);
-    }
-    const keys = locationKeys(this.cwd);
-    const linked = this.threadsForLocation(keys);
-    if (linked.length === 1) {
-      this.bound = linked[0].id;
-      for (const k of keys) if (isRepoKey(k)) this.addLink(linked[0].id, k);
-      return linked[0];
-    }
-    const hint = linked.length
-      ? `Linked threads here: ${linked.map((t) => `${t.id} "${t.title}"`).join(", ")}.`
+    const { id, ranked } = this.locate(locationKeys(this.cwd), recent?.thread_id ?? null);
+    if (id) return this.getThread((this.bound = id));
+    const hint = ranked.length
+      ? `Linked threads here: ${ranked.map((t) => `${t.id} "${t.title}"`).join(", ")}.`
       : "Use `plantrail threads` or `plantrail create`.";
     throw new NotBoundError(`No thread bound. Run \`plantrail bind <thread_id>\`. ${hint}`);
   }
@@ -1279,19 +1304,15 @@ export class Store {
       return this.statusText(prev);
     }
     const keys = locationKeys(this.cwd);
-    const linked = this.threadsForLocation(keys);
-    if (linked.length === 1) {
-      // Matched on some key (e.g. the origin URL after a move): add the others so
-      // this location keeps matching even if that key changes later. Worktree/branch
-      // keys aren't added: a repo-level match doesn't say the thread belongs here.
-      for (const k of keys) if (isRepoKey(k)) this.addLink(linked[0].id, k);
-      this.bindInner(linked[0].id, sessionId);
-      return this.statusText(linked[0].id);
+    const { id, ranked } = this.locate(keys, null);
+    if (id) {
+      this.bindInner(id, sessionId);
+      return this.statusText(id);
     }
-    if (linked.length > 1) {
+    if (ranked.length) {
       return [
-        "[plantrail] Multiple active threads are linked to this location. Ask the user which one, then run `plantrail bind <thread_id>`:",
-        ...linked.map((t) => `  ${t.id} "${t.title}" (touched ${t.touched_at.slice(0, 10)})`),
+        "[plantrail] Several active threads are linked to this location, none more specifically than the others. Ask the user which one, then run `plantrail bind <thread_id>`:",
+        ...ranked.map((t) => `  ${t.id} "${t.title}" (touched ${t.touched_at.slice(0, 10)})`),
       ].join("\n");
     }
     return this.parkedHere(keys);

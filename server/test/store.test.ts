@@ -158,7 +158,7 @@ test("resume binds by session, then by linked location", () => {
   // A second thread linked here makes location ambiguous, but session s1 stays bound.
   new Store(db, dir, now).createThread("Second", "g");
   assert.match(new Store(db, dir, now).resume("s1"), /t1 "Test"/);
-  assert.match(new Store(db, dir, now).resume("s2"), /Multiple active threads/);
+  assert.match(new Store(db, dir, now).resume("s2"), /Several active threads/);
 });
 
 test("current() prefers this session's binding over the cwd's latest", () => {
@@ -620,4 +620,32 @@ test("threads link to their worktree and branch; repo-level matches don't add th
   const elsewhere = mkdtempSync(join(tmpdir(), "plantrail-else-"));
   at(elsewhere, "s5").bind("t2");
   assert.equal(kinds("t2").length, 2);
+});
+
+test("resume/current pick the thread linked most specifically to this worktree/branch", () => {
+  const main = realpathSync(mkdtempSync(join(tmpdir(), "plantrail-rank-")));
+  const wt = `${main}-feat`;
+  const git = (...args: string[]) => execFileSync("git", ["-C", main, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { stdio: "ignore" });
+  git("init", "-q", "-b", "main");
+  git("commit", "-q", "--allow-empty", "-m", "one");
+  git("worktree", "add", "-q", "-b", "feat", wt);
+  const db = openDb(":memory:");
+  const at = (cwd: string, session: string | null = null) => Object.assign(new Store(db, cwd), { session });
+  at(main, "s1").createThread("Main", "g");
+  at(wt, "s2").createThread("Feat", "g");
+  assert.match(at(main).resume("r1"), /t1 "Main"/);
+  assert.match(at(wt).resume("r2"), /t2 "Feat"/);
+  assert.equal(at(main).current().id, "t1");
+  assert.equal(at(wt).current().id, "t2");
+  // Same worktree, different branch: the branch link decides.
+  git("checkout", "-q", "-b", "other");
+  at(main, "s3").createThread("Other", "g");
+  assert.match(at(main).resume("r3"), /t3 "Other"/);
+  git("checkout", "-q", "main");
+  assert.match(at(main).resume("r4"), /t1 "Main"/);
+  // Outside git there are no specific keys, so two threads here tie: ask.
+  const plain = realpathSync(mkdtempSync(join(tmpdir(), "plantrail-plain-")));
+  at(plain, "s5").createThread("A", "g");
+  at(plain, "s6").createThread("B", "g");
+  assert.match(at(plain).resume("r5"), /Several active threads/);
 });
