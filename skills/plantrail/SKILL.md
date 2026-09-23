@@ -1,6 +1,7 @@
 ---
 name: plantrail
 description: Track long-running, multi-session work with the plantrail CLI (~/.plantrail/bin/plantrail status/add/start/done/checkpoint/next). Use when a task spans many steps or sessions, when the user asks to plan/break down/track work, when a SessionStart message begins with "[plantrail]", or before /clear or compaction on tracked work.
+allowed-tools: Bash(~/.plantrail/bin/plantrail:*)
 ---
 
 # plantrail

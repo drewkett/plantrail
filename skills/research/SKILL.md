@@ -1,6 +1,7 @@
 ---
 name: research
 description: Run open-ended research (investigating a question, surveying options, debugging an unknown, comparing libraries/approaches) as a tree of questions and findings in plantrail, so evidence and confidence survive /clear, compaction, and new sessions. Use when the user asks to research/investigate/figure out something that needs many lookups, or when an plantrail thread holds open questions.
+allowed-tools: Bash(~/.plantrail/bin/plantrail:*)
 ---
 
 # research

@@ -1,6 +1,6 @@
 ---
 description: Resume the bound plantrail thread and keep working without asking
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node:*), Bash(~/.plantrail/bin/plantrail:*)
 ---
 !`node "${CLAUDE_PLUGIN_ROOT}/server/dist/cli.js" status`
 

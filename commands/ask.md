@@ -1,7 +1,7 @@
 ---
 description: Answer a question only from what plantrail has recorded
 argument-hint: <question>
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node:*), Bash(~/.plantrail/bin/plantrail:*)
 ---
 Question: $ARGUMENTS
 

@@ -1,6 +1,6 @@
 ---
 description: Rank what to work on next in the bound plantrail thread
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node:*), Bash(~/.plantrail/bin/plantrail:*)
 ---
 !`node "${CLAUDE_PLUGIN_ROOT}/server/dist/cli.js" next`
 

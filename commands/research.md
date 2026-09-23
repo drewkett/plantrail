@@ -1,6 +1,7 @@
 ---
 description: Research a question as a plantrail tree of questions and findings
 argument-hint: <question>
+allowed-tools: Bash(~/.plantrail/bin/plantrail:*)
 ---
 Research this question: $ARGUMENTS
 

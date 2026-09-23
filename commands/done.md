@@ -1,7 +1,7 @@
 ---
 description: Close the active plantrail node with a summary
 argument-hint: [node id or summary hints]
-allowed-tools: Bash(node:*), Bash(git log:*), Bash(git status:*)
+allowed-tools: Bash(node:*), Bash(~/.plantrail/bin/plantrail:*), Bash(git log:*), Bash(git status:*)
 ---
 !`node "${CLAUDE_PLUGIN_ROOT}/server/dist/cli.js" status`
 

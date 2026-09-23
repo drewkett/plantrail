@@ -1,7 +1,7 @@
 ---
 description: Write a plantrail handoff note now, e.g. before /clear
 argument-hint: [extra note]
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node:*), Bash(~/.plantrail/bin/plantrail:*)
 ---
 !`node "${CLAUDE_PLUGIN_ROOT}/server/dist/cli.js" status`
 
