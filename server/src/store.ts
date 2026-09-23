@@ -724,7 +724,7 @@ export class Store {
       if (this.blockers(node.id).length) continue;
       const openKids = this.children(node.id).filter((c) => !RESOLVED.includes(c.status)).length;
       const depth = this.depth(node);
-      const staleDays = Math.min(7, (now - Date.parse(node.updated_at)) / 86_400_000);
+      const staleDays = Math.min(7, (now - Date.parse(node.updated_at)) / DAY);
       const leaf = openKids === 0 ? 5 : 0;
       let research = 0;
       let researchWhy: string | null = null;
