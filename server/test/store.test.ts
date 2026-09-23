@@ -79,6 +79,9 @@ test("parent cannot be done with open children; reports when ready", () => {
 test("add rejects forward refs for parent and cross-thread ids", () => {
   const { store } = setup();
   assert.throws(() => store.add([{ title: "a", parent: "#1" }, { title: "b" }]), /earlier item/);
+  assert.throws(() => store.add([{ title: "a", parent: "#0" }]), /earlier item/);
+  assert.throws(() => store.add([{ title: "a", blocked_by: ["#0"] }]), /earlier item/);
+  assert.throws(() => store.add([{ title: "a", blocks: ["#0"] }]), /cannot block itself/);
   const [x] = store.add([{ title: "x" }]);
   store.createThread("Other", "g", false);
   assert.throws(() => store.add([{ title: "y", parent: x.id }]), /belongs to thread t1/);
@@ -410,4 +413,21 @@ test("log interleaves checkpoints and resolved nodes, newest first", () => {
   );
   assert.equal(store.log(1).length, 1);
   assert.ok(!log.some((e) => e.node?.id === c.id));
+});
+
+test("concurrent opens of a fresh db migrate once", async () => {
+  const { spawn } = await import("node:child_process");
+  const file = join(mkdtempSync(join(tmpdir(), "plantrail-test-")), "state.db");
+  const code = `import { openDb } from ${JSON.stringify(new URL("../src/db.ts", import.meta.url).href)}; openDb(${JSON.stringify(file)});`;
+  const runs = Array.from({ length: 8 }, () =>
+    new Promise<{ status: number | null; err: string }>((res) => {
+      const p = spawn(process.execPath, ["--input-type=module", "-e", code]);
+      let err = "";
+      p.stderr.on("data", (d) => (err += d));
+      p.on("close", (status) => res({ status, err }));
+    }),
+  );
+  for (const r of await Promise.all(runs)) assert.equal(r.status, 0, r.err);
+  const db = openDb(file);
+  assert.equal((db.prepare("SELECT count(*) AS c FROM counters").get() as { c: number }).c, 2);
 });

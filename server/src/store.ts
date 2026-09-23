@@ -158,7 +158,10 @@ export class Store {
   private depth(node: Node): number {
     let d = 0;
     let p = node.parent_id;
-    while (p) {
+    const seen = new Set([node.id]);
+    // Guard against parent cycles in existing data.
+    while (p && !seen.has(p)) {
+      seen.add(p);
       d++;
       p = (this.db.prepare("SELECT parent_id FROM nodes WHERE id = ?").get(p) as { parent_id: string | null })
         .parent_id;
@@ -366,11 +369,14 @@ export class Store {
       const deferred: [string, string][] = [];
       for (const it of items) {
         const id = this.nextId("n");
+        // Resolve before pushing so `#i` can't refer to item i itself.
+        const parent = it.parent ? resolve(it.parent) : null;
+        const blockedBy = (it.blocked_by ?? []).map(resolve);
         ids.push(id);
         insert.run(
           id,
           thread.id,
-          it.parent ? resolve(it.parent) : null,
+          parent,
           it.kind ?? "task",
           it.title,
           it.body ?? null,
@@ -378,7 +384,7 @@ export class Store {
           now,
           now,
         );
-        for (const b of it.blocked_by ?? []) edge.run(resolve(b), id);
+        for (const b of blockedBy) edge.run(b, id);
         // `blocks` may point forward within the batch; resolve after all inserts.
         for (const b of it.blocks ?? []) deferred.push([id, b]);
       }
@@ -570,8 +576,9 @@ export class Store {
     const parent = this.getNode(parentId);
     if (parent.thread_id !== node.thread_id) throw new PlantrailError(`${parentId} belongs to thread ${parent.thread_id}`);
     if (parent.kind === "finding") throw new PlantrailError(`${parentId} is a finding and can't have children`);
-    for (let p: Node | null = parent; p; p = p.parent_id ? this.getNode(p.parent_id) : null)
-      if (p.id === node.id) throw new PlantrailError(`Can't move ${node.id} under its own subtree (${parentId})`);
+    const seen = new Set<string>();
+    for (let p: Node | null = parent; p && !seen.has(p.id); p = p.parent_id ? this.getNode(p.parent_id) : null)
+      if (seen.add(p.id) && p.id === node.id) throw new PlantrailError(`Can't move ${node.id} under its own subtree (${parentId})`);
   }
 
   /**

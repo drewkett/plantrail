@@ -111,23 +111,45 @@ export function openDb(path?: string): DB {
     file = join(home, "state.db");
   }
   const db = new DatabaseSync(file);
-  if (file !== ":memory:") db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+  // busy_timeout first: switching to WAL needs a lock that concurrent openers may hold.
+  db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
+  if (file !== ":memory:") enableWal(db);
   migrate(db);
   return db;
 }
 
-function migrate(db: DB): void {
-  const { user_version } = db.prepare("PRAGMA user_version").get() as { user_version: number };
-  for (let v = user_version; v < MIGRATIONS.length; v++) {
-    db.exec("BEGIN");
+/**
+ * The switch to WAL (persistent, so only a fresh db's first opens pay it) takes a lock
+ * upgrade that SQLite won't wait on via busy_timeout; retry briefly instead.
+ */
+function enableWal(db: DB): void {
+  for (let attempt = 0; ; attempt++) {
     try {
+      db.exec("PRAGMA journal_mode = WAL");
+      return;
+    } catch (e) {
+      if ((e as { errcode?: number }).errcode !== 5 || attempt >= 50) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
+}
+
+function userVersion(db: DB): number {
+  return (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+}
+
+/** Concurrent openers serialize on BEGIN IMMEDIATE and re-read the version under the lock. */
+function migrate(db: DB): void {
+  if (userVersion(db) >= MIGRATIONS.length) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (let v = userVersion(db); v < MIGRATIONS.length; v++) {
       db.exec(MIGRATIONS[v]);
       db.exec(`PRAGMA user_version = ${v + 1}`);
-      db.exec("COMMIT");
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
     }
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
   }
 }
