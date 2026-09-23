@@ -23,7 +23,7 @@ test("cli: create, add via stdin, workflow rules, status", () => {
   const ap = setup();
   assert.equal(ap(["status"]).code, 1);
   assert.match(ap(["create", "Demo", "--goal", "g"]).out, /Created and bound t1/);
-  const add = ap(["add", "-"], JSON.stringify([{ title: "a", blocks: ["#1"] }, { title: "b", kind: "question" }]));
+  const add = ap(["add", "-"], JSON.stringify([{ title: "a", blocks: ["#2"] }, { title: "b", kind: "question" }]));
   assert.equal(add.out, "n1 [task/open] a\nn2 [question/open] b");
   assert.match(ap(["start", "n2"]).err, /blocked by n1/);
   assert.match(ap(["done", "n1"]).err, /Missing --summary/);
@@ -69,7 +69,7 @@ test("cli: stop/precompact hooks emit JSON only when there is something to recor
 test("cli: export md and json", () => {
   const ap = setup();
   ap(["create", "Demo", "--goal", "ship it"]);
-  ap(["add", "-"], JSON.stringify([{ title: "dep" }, { title: "parent" }, { title: "child", parent: "#1", blocked_by: ["#0"] }]));
+  ap(["add", "-"], JSON.stringify([{ title: "dep" }, { title: "parent" }, { title: "child", parent: "#2", blocked_by: ["#1"] }]));
   ap(["done", "n1", "--summary", "dep done", "--ref", "a.ts"]);
   ap(["checkpoint", "cp note"]);
   const md = ap(["export"]).out;

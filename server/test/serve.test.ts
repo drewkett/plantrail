@@ -22,7 +22,7 @@ test("html export escapes script-breaking text", () => {
 test("serve: index, thread page, version changes on edit, 404s", async () => {
   const store = new Store(openDb(":memory:"), mkdtempSync(join(tmpdir(), "plantrail-test-")));
   store.createThread("Demo", "ship it");
-  store.add([{ title: "a", blocks: ["#1"] }, { title: "b" }]);
+  store.add([{ title: "a", blocks: ["#2"] }, { title: "b" }]);
   const srv = serve(store, 0);
   await once(srv, "listening");
   const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;

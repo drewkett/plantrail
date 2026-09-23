@@ -15,8 +15,8 @@ Research in plantrail is a tree of **questions** answered by **findings**. Each 
    ```sh
    ~/.plantrail/bin/plantrail add - <<'JSON'
    [{"title": "Which queue fits our load?", "kind": "question"},
-    {"title": "Throughput of X at 10k msg/s?", "kind": "question", "parent": "#0"},
-    {"title": "Does Y support exactly-once?", "kind": "question", "parent": "#0"}]
+    {"title": "Throughput of X at 10k msg/s?", "kind": "question", "parent": "#1"},
+    {"title": "Does Y support exactly-once?", "kind": "question", "parent": "#1"}]
    JSON
    ```
    Keep questions specific and answerable; split broad ones rather than researching them whole.

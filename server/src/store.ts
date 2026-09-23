@@ -41,7 +41,7 @@ export interface Node {
 export interface AddItem {
   title: string;
   kind?: NodeKind;
-  /** Node id, or `#i` referencing the i-th item of the same add() call. */
+  /** Node id, or `#i` referencing the i-th item (1-based) of the same add() call. */
   parent?: string;
   body?: string;
   priority?: number;
@@ -386,13 +386,13 @@ export class Store {
       const resolve = (ref: string): string => {
         const m = /^#(\d+)$/.exec(ref);
         if (m) {
+          // `#i` is 1-based, like node ids: #1 is the first item.
           const i = Number(m[1]);
-          const id = ids[i];
+          const id = ids[i - 1];
           if (id) return id;
-          // `#i` is 0-based: #0 is the first item. Easy to mistake for 1-based, so say so.
-          if (i >= items.length)
-            throw new PlantrailError(`Reference ${ref} is out of range: this call has ${items.length} item(s), #0..#${items.length - 1} (#0 is the first)`);
-          throw new PlantrailError(`Reference ${ref} in parent/blocked_by must point to an earlier item in this call (#0 is the first); use blocks for forward edges`);
+          if (i < 1 || i > items.length)
+            throw new PlantrailError(`Reference ${ref} is out of range: this call has ${items.length} item(s), #1..#${items.length} (#1 is the first)`);
+          throw new PlantrailError(`Reference ${ref} in parent/blocked_by must point to an earlier item in this call (#1 is the first); use blocks for forward edges`);
         }
         const n = this.getNode(ref);
         if (n.thread_id !== thread.id) throw new PlantrailError(`${ref} belongs to thread ${n.thread_id}`);

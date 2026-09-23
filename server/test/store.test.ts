@@ -27,7 +27,7 @@ test("ids are short and sequential", () => {
 
 test("done requires summary and unblocks dependents", () => {
   const { store } = setup();
-  const [a, b] = store.add([{ title: "a", blocks: ["#1"] }, { title: "b" }]);
+  const [a, b] = store.add([{ title: "a", blocks: ["#2"] }, { title: "b" }]);
   assert.throws(() => store.start(b.id), /blocked by n1/);
   assert.throws(() => store.done(a.id, "  "), PlantrailError);
   const r = store.done(a.id, "did a", ["file.ts"]);
@@ -37,7 +37,7 @@ test("done requires summary and unblocks dependents", () => {
 
 test("manually blocked node reopens when last blocker resolves", () => {
   const { store } = setup();
-  const [a, b, c] = store.add([{ title: "a" }, { title: "b" }, { title: "c", blocked_by: ["#0", "#1"] }]);
+  const [a, b, c] = store.add([{ title: "a" }, { title: "b" }, { title: "c", blocked_by: ["#1", "#2"] }]);
   store.update(c.id, { status: "blocked" });
   assert.deepEqual(store.done(a.id, "x").unblocked, []);
   assert.equal(store.getNode(c.id).status, "blocked");
@@ -70,7 +70,7 @@ test("start demotes the previous active node", () => {
 
 test("parent cannot be done with open children; reports when ready", () => {
   const { store } = setup();
-  const [p, c1, c2] = store.add([{ title: "p" }, { title: "c1", parent: "#0" }, { title: "c2", parent: "#0" }]);
+  const [p, c1, c2] = store.add([{ title: "p" }, { title: "c1", parent: "#1" }, { title: "c2", parent: "#1" }]);
   assert.throws(() => store.done(p.id, "x"), /unresolved children/);
   assert.equal(store.done(c1.id, "x").parentReady, null);
   assert.equal(store.update(c2.id, { status: "abandoned", summary: "dup" }).node.status, "abandoned");
@@ -79,12 +79,13 @@ test("parent cannot be done with open children; reports when ready", () => {
 
 test("add rejects forward refs for parent and cross-thread ids", () => {
   const { store } = setup();
-  assert.throws(() => store.add([{ title: "a", parent: "#1" }, { title: "b" }]), /earlier item/);
-  assert.throws(() => store.add([{ title: "a", parent: "#0" }]), /earlier item/);
-  assert.throws(() => store.add([{ title: "a", blocked_by: ["#0"] }]), /earlier item/);
-  assert.throws(() => store.add([{ title: "a", blocks: ["#1"] }]), /#1 is out of range: this call has 1 item\(s\), #0\.\.#0/);
-  assert.throws(() => store.add([{ title: "a" }, { title: "b", parent: "#2" }]), /out of range.*#0 is the first/);
-  assert.throws(() => store.add([{ title: "a", blocks: ["#0"] }]), /cannot block itself/);
+  assert.throws(() => store.add([{ title: "a", parent: "#2" }, { title: "b" }]), /earlier item/);
+  assert.throws(() => store.add([{ title: "a", parent: "#1" }]), /earlier item/);
+  assert.throws(() => store.add([{ title: "a", blocked_by: ["#1"] }]), /earlier item/);
+  assert.throws(() => store.add([{ title: "a", blocks: ["#2"] }]), /#2 is out of range: this call has 1 item\(s\), #1\.\.#1/);
+  assert.throws(() => store.add([{ title: "a" }, { title: "b", parent: "#3" }]), /out of range.*#1 is the first/);
+  assert.throws(() => store.add([{ title: "a" }, { title: "b", parent: "#0" }]), /#0 is out of range/);
+  assert.throws(() => store.add([{ title: "a", blocks: ["#1"] }]), /cannot block itself/);
   const [x] = store.add([{ title: "x" }]);
   store.createThread("Other", "g", false);
   assert.throws(() => store.add([{ title: "y", parent: x.id }]), /belongs to thread t1/);
@@ -94,11 +95,11 @@ test("next_options: priority > leaf > depth, skips blocked and non-actionable ki
   const { store } = setup();
   const [epic, leafDeep, , , hi, blocked] = store.add([
     { title: "epic" },
-    { title: "deep leaf", parent: "#0" },
+    { title: "deep leaf", parent: "#1" },
     { title: "shallow leaf" },
     { title: "a finding", kind: "finding" },
     { title: "urgent", priority: 2 },
-    { title: "blocked", priority: 5, blocked_by: ["#2"] },
+    { title: "blocked", priority: 5, blocked_by: ["#3"] },
   ]);
   const ids = store.nextOptions(10).map((o) => o.node.id);
   assert.equal(ids[0], hi.id);
@@ -119,7 +120,7 @@ test("next_options: stale nodes float up", () => {
 
 test("status is compact and includes checkpoint", () => {
   const { store } = setup();
-  const [a] = store.add([{ title: "a" }, { title: "b", blocked_by: ["#0"] }]);
+  const [a] = store.add([{ title: "a" }, { title: "b", blocked_by: ["#1"] }]);
   store.start(a.id);
   store.checkpoint("halfway through a");
   const s = store.statusText();
@@ -199,7 +200,7 @@ test("recordFinding validates input", () => {
 
 test("recordFinding --answers closes the question and unblocks dependents", () => {
   const { store, db } = setup();
-  const [q, t] = store.add([{ title: "q", kind: "question", blocks: ["#1"] }, { title: "t" }]);
+  const [q, t] = store.add([{ title: "q", kind: "question", blocks: ["#2"] }, { title: "t" }]);
   const { node: f, closed } = store.recordFinding(q.id, "yes", 0.8, ["src"], true);
   assert.equal(closed!.node.status, "done");
   assert.match(closed!.node.summary!, new RegExp(`Answered by ${f.id}: yes`));
@@ -211,7 +212,7 @@ test("recordFinding --answers closes the question and unblocks dependents", () =
 
 test("recordFinding --answers refuses a question with open children, leaving no finding", () => {
   const { store } = setup();
-  const [q] = store.add([{ title: "q", kind: "question" }, { title: "sub", parent: "#0" }]);
+  const [q] = store.add([{ title: "q", kind: "question" }, { title: "sub", parent: "#1" }]);
   assert.throws(() => store.recordFinding(q.id, "x", undefined, undefined, true), /unresolved children/);
   assert.equal(store.children(q.id).filter((c) => c.kind === "finding").length, 0);
 });
@@ -406,7 +407,7 @@ test("finish and reopen threads", () => {
 
 test("move and delete nodes", () => {
   const { store } = setup();
-  const [a, b, c, d] = store.add([{ title: "a" }, { title: "b", parent: "#0" }, { title: "c" }, { title: "d", blocks: ["#2"] }]);
+  const [a, b, c, d] = store.add([{ title: "a" }, { title: "b", parent: "#1" }, { title: "c" }, { title: "d", blocks: ["#3"] }]);
   assert.equal(store.update(c.id, { parent: b.id }).node.parent_id, b.id);
   assert.throws(() => store.update(a.id, { parent: c.id }), /own subtree/);
   assert.throws(() => store.update(a.id, { parent: a.id }), /own subtree/);
@@ -459,10 +460,10 @@ test("log interleaves checkpoints and resolved nodes, newest first", () => {
 
 test("add rejects blocks cycles, direct or transitive, and rolls back", () => {
   const { store, db } = setup();
-  const [a, b] = store.add([{ title: "a" }, { title: "b", blocked_by: ["#0"] }]);
+  const [a, b] = store.add([{ title: "a" }, { title: "b", blocked_by: ["#1"] }]);
   assert.throws(() => store.add([{ title: "c", blocked_by: [a.id], blocks: [a.id] }]), /cycle/);
   assert.throws(() => store.add([{ title: "c", blocked_by: [b.id], blocks: [a.id] }]), /cycle/);
-  assert.throws(() => store.add([{ title: "c", blocks: ["#1"] }, { title: "d", blocks: ["#0"] }]), /cycle/);
+  assert.throws(() => store.add([{ title: "c", blocks: ["#2"] }, { title: "d", blocks: ["#1"] }]), /cycle/);
   assert.equal(db.isTransaction, false);
   assert.equal(store.search("c").length, 0);
   assert.equal(store.add([{ title: "e", blocked_by: [a.id, a.id] }]).length, 1);

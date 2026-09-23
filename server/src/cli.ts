@@ -24,7 +24,7 @@ const USAGE = `usage: plantrail <command> [args] [--cwd DIR] [--thread ID]
   add TITLE [--kind K] [--parent ID] [--body B] [--priority N] [--blocks ID,..] [--blocked-by ID,..]
   add -                                    add items from a JSON array on stdin
                                            ({title, kind?, parent?, body?, priority?, blocks?, blocked_by?};
-                                            "#i" refers to item i of the same array, 0-based: #0 is the first)
+                                            "#i" refers to the i-th item of the same array; #1 is the first)
   start ID                                 mark active (refuses if blocked)
   done ID --summary S [--ref R]...         complete; summary required
   finding ID TEXT [--confidence 0..1] [--source S]... [--answers]
