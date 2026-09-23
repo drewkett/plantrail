@@ -1,20 +1,16 @@
 {
   "name": "plantrail-server",
   "version": "0.1.0",
-  "description": "plantrail MCP server + CLI",
+  "description": "plantrail CLI",
   "directories": {
     "test": "test"
   },
   "scripts": {
-    "build": "esbuild src/index.ts src/cli.ts --bundle --platform=node --format=esm --target=node22 --minify --outdir=dist --banner:js=\"import{createRequire}from\\\"module\\\";const require=createRequire(import.meta.url);\"",
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --minify --outdir=dist",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/"
   },
   "type": "module",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "zod": "^4.6.5"
-  },
   "devDependencies": {
     "@types/node": "^26.6.2",
     "esbuild": "^0.28.2",

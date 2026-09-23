@@ -1,4 +1,3 @@
-import{createRequire}from"module";const require=createRequire(import.meta.url);
 import{parseArgs as Oe}from"node:util";import{chmodSync as Ae,mkdirSync as De,readFileSync as Ie,writeFileSync as ce}from"node:fs";import{join as re}from"node:path";import{fileURLToPath as Ce}from"node:url";import{DatabaseSync as he}from"node:sqlite";import{existsSync as U,mkdirSync as pe,renameSync as ge,rmSync as fe}from"node:fs";import{homedir as F}from"node:os";import{join as R}from"node:path";function D(){if(process.env.PLANTRAIL_HOME)return process.env.PLANTRAIL_HOME;let i=R(F(),".plantrail");return me(R(F(),".autoplan"),i),i}function me(i,e){if(!(U(e)||!U(i)))try{ge(i,e),fe(R(e,"bin","autoplan"),{force:!0})}catch{}}var A=[`
   CREATE TABLE counters (name TEXT PRIMARY KEY, next INTEGER NOT NULL);
   INSERT INTO counters VALUES ('t', 1), ('n', 1);

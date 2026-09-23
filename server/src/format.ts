@@ -1,5 +1,5 @@
-// Result formatting shared by the CLI and the MCP server. `doneHint` renders
-// the "complete the parent" suggestion in each front end's own syntax.
+// Result formatting for the CLI. `doneHint` renders the "complete the parent"
+// suggestion in the caller's syntax.
 import type { LinkKey } from "./repo.ts";
 import type { LogEntry, Node, Option, SearchHit, Thread } from "./store.ts";
 

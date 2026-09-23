@@ -85,7 +85,7 @@ export const STALE_ACTIVE_DAYS = 3;
 const DAY = 86_400_000;
 
 export class Store {
-  /** Thread bound to this process (one MCP server per Claude session). */
+  /** Thread bound to this process: explicit --thread, else resolved by current(). */
   bound: string | null = null;
 
   readonly db: DB;
